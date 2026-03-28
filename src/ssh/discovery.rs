@@ -42,10 +42,6 @@ pub fn parse_ss_output(output: &str) -> Vec<DiscoveredPort> {
         let local_addr = parts[3];
         let (bind_address, port) = parse_address_port(local_addr);
 
-        if bind_address == "127.0.0.1" || bind_address == "::1" {
-            continue;
-        }
-
         let port = match port {
             Some(p) => p,
             None => continue,
@@ -65,6 +61,7 @@ pub fn parse_ss_output(output: &str) -> Vec<DiscoveredPort> {
         });
     }
 
+    ports.sort_by_key(|p| p.port);
     ports
 }
 
@@ -92,10 +89,6 @@ pub fn parse_netstat_output(output: &str) -> Vec<DiscoveredPort> {
             parse_address_port(local_addr)
         };
 
-        if bind_address == "127.0.0.1" || bind_address == "::1" {
-            continue;
-        }
-
         let port = match port {
             Some(p) => p,
             None => continue,
@@ -120,6 +113,7 @@ pub fn parse_netstat_output(output: &str) -> Vec<DiscoveredPort> {
         });
     }
 
+    ports.sort_by_key(|p| p.port);
     ports
 }
 
@@ -182,13 +176,17 @@ LISTEN 0      128          0.0.0.0:18120      0.0.0.0:*    users:((\"go-build\",
 LISTEN 0      128        127.0.0.1:6379       0.0.0.0:*    users:((\"redis\",pid=910,fd=6))
 ";
         let ports = parse_ss_output(output);
-        assert_eq!(ports.len(), 2);
-        assert_eq!(ports[0].port, 18080);
-        assert_eq!(ports[0].bind_address, "0.0.0.0");
-        assert_eq!(ports[0].process_name.as_deref(), Some("python3"));
-        assert_eq!(ports[0].pid, Some(1234));
-        assert_eq!(ports[1].port, 18120);
-        assert_eq!(ports[1].process_name.as_deref(), Some("go-build"));
+        assert_eq!(ports.len(), 3);
+        // Sorted by port
+        assert_eq!(ports[0].port, 6379);
+        assert_eq!(ports[0].bind_address, "127.0.0.1");
+        assert_eq!(ports[0].process_name.as_deref(), Some("redis"));
+        assert_eq!(ports[1].port, 18080);
+        assert_eq!(ports[1].bind_address, "0.0.0.0");
+        assert_eq!(ports[1].process_name.as_deref(), Some("python3"));
+        assert_eq!(ports[1].pid, Some(1234));
+        assert_eq!(ports[2].port, 18120);
+        assert_eq!(ports[2].process_name.as_deref(), Some("go-build"));
     }
 
     #[test]
@@ -199,10 +197,12 @@ LISTEN 0      128             [::]:8080          [::]:*    users:((\"nginx\",pid
 LISTEN 0      128            [::1]:5432          [::]:*    users:((\"postgres\",pid=200,fd=4))
 ";
         let ports = parse_ss_output(output);
-        assert_eq!(ports.len(), 1);
-        assert_eq!(ports[0].port, 8080);
-        assert_eq!(ports[0].bind_address, "::");
-        assert_eq!(ports[0].process_name.as_deref(), Some("nginx"));
+        assert_eq!(ports.len(), 2);
+        assert_eq!(ports[0].port, 5432);
+        assert_eq!(ports[0].bind_address, "::1");
+        assert_eq!(ports[1].port, 8080);
+        assert_eq!(ports[1].bind_address, "::");
+        assert_eq!(ports[1].process_name.as_deref(), Some("nginx"));
     }
 
     #[test]
@@ -235,12 +235,15 @@ tcp        0      0 127.0.0.1:6379          0.0.0.0:*               LISTEN      
 tcp6       0      0 :::8080                 :::*                    LISTEN      100/nginx
 ";
         let ports = parse_netstat_output(output);
-        assert_eq!(ports.len(), 2);
-        assert_eq!(ports[0].port, 18080);
-        assert_eq!(ports[0].process_name.as_deref(), Some("python3"));
-        assert_eq!(ports[0].pid, Some(1234));
+        assert_eq!(ports.len(), 3);
+        // Sorted by port
+        assert_eq!(ports[0].port, 6379);
+        assert_eq!(ports[0].bind_address, "127.0.0.1");
         assert_eq!(ports[1].port, 8080);
         assert_eq!(ports[1].bind_address, "::");
+        assert_eq!(ports[2].port, 18080);
+        assert_eq!(ports[2].process_name.as_deref(), Some("python3"));
+        assert_eq!(ports[2].pid, Some(1234));
     }
 
     // ---- Display trait ----
@@ -352,9 +355,16 @@ LISTEN 0      128        127.0.0.1:9090      0.0.0.0:*    users:((\"local\",pid=
 LISTEN 0      128            [::1]:9090         [::]:*    users:((\"local\",pid=2,fd=6))
 ";
         let ports = parse_ss_output(output);
-        assert_eq!(ports.len(), 2);
+        assert_eq!(ports.len(), 4);
+        // Sorted by port: 8080 (x2), 9090 (x2)
+        assert_eq!(ports[0].port, 8080);
         assert_eq!(ports[0].bind_address, "0.0.0.0");
+        assert_eq!(ports[1].port, 8080);
         assert_eq!(ports[1].bind_address, "::");
+        assert_eq!(ports[2].port, 9090);
+        assert_eq!(ports[2].bind_address, "127.0.0.1");
+        assert_eq!(ports[3].port, 9090);
+        assert_eq!(ports[3].bind_address, "::1");
     }
 
     // ---- netstat edge cases ----
@@ -373,13 +383,15 @@ tcp        0      0 0.0.0.0:80              0.0.0.0:*               LISTEN      
     }
 
     #[test]
-    fn test_parse_netstat_filters_localhost() {
+    fn test_parse_netstat_includes_localhost() {
         let output = "\
 Proto Recv-Q Send-Q Local Address           Foreign Address         State       PID/Program name
 tcp        0      0 127.0.0.1:3306          0.0.0.0:*               LISTEN      500/mysqld
 ";
         let ports = parse_netstat_output(output);
-        assert!(ports.is_empty());
+        assert_eq!(ports.len(), 1);
+        assert_eq!(ports[0].port, 3306);
+        assert_eq!(ports[0].bind_address, "127.0.0.1");
     }
 
     #[test]
