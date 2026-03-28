@@ -1,4 +1,7 @@
+use anyhow::Result;
 use std::fmt;
+
+use super::connection::SshSession;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiscoveredPort {
@@ -150,6 +153,20 @@ fn parse_ss_process_info(info: &str) -> (Option<String>, Option<u32>) {
         .and_then(|s| s.parse().ok());
 
     (name, pid)
+}
+
+/// Discover listening ports on the remote host via SSH.
+/// Tries `ss -tlnp` first, falls back to `netstat -tlnp`.
+pub async fn discover_remote_ports(session: &SshSession) -> Result<Vec<DiscoveredPort>> {
+    // Try ss first
+    let output = session.exec("ss -tlnp 2>/dev/null").await?;
+    if !output.is_empty() && output.lines().count() > 1 {
+        return Ok(parse_ss_output(&output));
+    }
+
+    // Fall back to netstat
+    let output = session.exec("netstat -tlnp 2>/dev/null").await?;
+    Ok(parse_netstat_output(&output))
 }
 
 #[cfg(test)]
