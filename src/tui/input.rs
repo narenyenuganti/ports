@@ -82,3 +82,194 @@ fn handle_port_input(state: &mut AppState, key: KeyEvent) -> Action {
         _ => Action::None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ssh::discovery::DiscoveredPort;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent {
+            code,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        }
+    }
+
+    fn make_port(port: u16) -> DiscoveredPort {
+        DiscoveredPort {
+            port,
+            bind_address: "0.0.0.0".to_string(),
+            process_name: Some("test".to_string()),
+            pid: Some(1),
+        }
+    }
+
+    fn state_with_ports() -> AppState {
+        let mut state = AppState::new("host".to_string());
+        state.update_ports(vec![make_port(8080), make_port(3000), make_port(5000)]);
+        state
+    }
+
+    // ---- Normal mode tests ----
+
+    #[test]
+    fn test_quit() {
+        let mut state = AppState::new("host".to_string());
+        assert!(matches!(handle_key(&mut state, key(KeyCode::Char('q'))), Action::Quit));
+    }
+
+    #[test]
+    fn test_refresh() {
+        let mut state = AppState::new("host".to_string());
+        assert!(matches!(handle_key(&mut state, key(KeyCode::Char('r'))), Action::Refresh));
+    }
+
+    #[test]
+    fn test_reconnect() {
+        let mut state = AppState::new("host".to_string());
+        assert!(matches!(handle_key(&mut state, key(KeyCode::Char('c'))), Action::Reconnect));
+    }
+
+    #[test]
+    fn test_navigate_down_arrow() {
+        let mut state = state_with_ports();
+        assert!(matches!(handle_key(&mut state, key(KeyCode::Down)), Action::None));
+        assert_eq!(state.selected, 1);
+    }
+
+    #[test]
+    fn test_navigate_up_arrow() {
+        let mut state = state_with_ports();
+        state.selected = 2;
+        assert!(matches!(handle_key(&mut state, key(KeyCode::Up)), Action::None));
+        assert_eq!(state.selected, 1);
+    }
+
+    #[test]
+    fn test_navigate_j_k() {
+        let mut state = state_with_ports();
+        handle_key(&mut state, key(KeyCode::Char('j')));
+        assert_eq!(state.selected, 1);
+        handle_key(&mut state, key(KeyCode::Char('k')));
+        assert_eq!(state.selected, 0);
+    }
+
+    #[test]
+    fn test_enter_toggles_forward() {
+        let mut state = state_with_ports();
+        state.selected = 1;
+        assert!(matches!(handle_key(&mut state, key(KeyCode::Enter)), Action::ToggleForward(1)));
+    }
+
+    #[test]
+    fn test_enter_on_empty_ports_does_nothing() {
+        let mut state = AppState::new("host".to_string());
+        assert!(matches!(handle_key(&mut state, key(KeyCode::Enter)), Action::None));
+    }
+
+    #[test]
+    fn test_p_enters_port_input_mode() {
+        let mut state = state_with_ports();
+        handle_key(&mut state, key(KeyCode::Char('p')));
+        assert_eq!(state.input_mode, InputMode::PortInput(String::new()));
+    }
+
+    #[test]
+    fn test_p_on_empty_ports_stays_normal() {
+        let mut state = AppState::new("host".to_string());
+        handle_key(&mut state, key(KeyCode::Char('p')));
+        assert_eq!(state.input_mode, InputMode::Normal);
+    }
+
+    #[test]
+    fn test_unknown_key_does_nothing() {
+        let mut state = state_with_ports();
+        assert!(matches!(handle_key(&mut state, key(KeyCode::Char('x'))), Action::None));
+        assert_eq!(state.selected, 0);
+    }
+
+    // ---- Port input mode tests ----
+
+    #[test]
+    fn test_port_input_digits() {
+        let mut state = state_with_ports();
+        state.input_mode = InputMode::PortInput(String::new());
+        handle_key(&mut state, key(KeyCode::Char('8')));
+        handle_key(&mut state, key(KeyCode::Char('0')));
+        handle_key(&mut state, key(KeyCode::Char('8')));
+        handle_key(&mut state, key(KeyCode::Char('0')));
+        assert_eq!(state.input_mode, InputMode::PortInput("8080".to_string()));
+    }
+
+    #[test]
+    fn test_port_input_backspace() {
+        let mut state = state_with_ports();
+        state.input_mode = InputMode::PortInput("808".to_string());
+        handle_key(&mut state, key(KeyCode::Backspace));
+        assert_eq!(state.input_mode, InputMode::PortInput("80".to_string()));
+    }
+
+    #[test]
+    fn test_port_input_backspace_on_empty() {
+        let mut state = state_with_ports();
+        state.input_mode = InputMode::PortInput(String::new());
+        handle_key(&mut state, key(KeyCode::Backspace));
+        assert_eq!(state.input_mode, InputMode::PortInput(String::new()));
+    }
+
+    #[test]
+    fn test_port_input_esc_cancels() {
+        let mut state = state_with_ports();
+        state.input_mode = InputMode::PortInput("808".to_string());
+        assert!(matches!(handle_key(&mut state, key(KeyCode::Esc)), Action::None));
+        assert_eq!(state.input_mode, InputMode::Normal);
+    }
+
+    #[test]
+    fn test_port_input_enter_valid_port() {
+        let mut state = state_with_ports();
+        state.selected = 1;
+        state.input_mode = InputMode::PortInput("9090".to_string());
+        let action = handle_key(&mut state, key(KeyCode::Enter));
+        assert!(matches!(action, Action::StartForwardWithPort(1, 9090)));
+        assert_eq!(state.input_mode, InputMode::Normal);
+    }
+
+    #[test]
+    fn test_port_input_enter_empty_string() {
+        let mut state = state_with_ports();
+        state.input_mode = InputMode::PortInput(String::new());
+        let action = handle_key(&mut state, key(KeyCode::Enter));
+        assert!(matches!(action, Action::None));
+        assert_eq!(state.input_mode, InputMode::Normal);
+        assert!(state.status_message.is_some());
+    }
+
+    #[test]
+    fn test_port_input_enter_overflow() {
+        let mut state = state_with_ports();
+        state.input_mode = InputMode::PortInput("99999".to_string());
+        let action = handle_key(&mut state, key(KeyCode::Enter));
+        assert!(matches!(action, Action::None));
+        assert_eq!(state.status_message.as_deref(), Some("Invalid port number"));
+    }
+
+    #[test]
+    fn test_port_input_ignores_non_digit_chars() {
+        let mut state = state_with_ports();
+        state.input_mode = InputMode::PortInput("80".to_string());
+        handle_key(&mut state, key(KeyCode::Char('a')));
+        assert_eq!(state.input_mode, InputMode::PortInput("80".to_string()));
+    }
+
+    #[test]
+    fn test_port_input_ignores_unknown_keys() {
+        let mut state = state_with_ports();
+        state.input_mode = InputMode::PortInput("80".to_string());
+        handle_key(&mut state, key(KeyCode::Tab));
+        assert_eq!(state.input_mode, InputMode::PortInput("80".to_string()));
+    }
+}
