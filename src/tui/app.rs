@@ -188,4 +188,148 @@ mod tests {
         state.update_ports(vec![make_port(8080, "a")]);
         assert_eq!(state.selected, 0);
     }
+
+    // ---- selected_port ----
+
+    #[test]
+    fn test_selected_port_returns_entry() {
+        let mut state = AppState::new("host".to_string());
+        state.update_ports(vec![make_port(8080, "nginx"), make_port(3000, "node")]);
+        state.selected = 1;
+        let entry = state.selected_port().unwrap();
+        assert_eq!(entry.discovered.port, 3000);
+    }
+
+    #[test]
+    fn test_selected_port_empty_returns_none() {
+        let state = AppState::new("host".to_string());
+        assert!(state.selected_port().is_none());
+    }
+
+    // ---- set_forward_active ----
+
+    #[test]
+    fn test_set_forward_active() {
+        let mut state = AppState::new("host".to_string());
+        state.update_ports(vec![make_port(8080, "nginx")]);
+        state.set_forward_active(0, 9090);
+        assert_eq!(
+            state.ports[0].forward_status,
+            ForwardStatus::Active { local_port: 9090 }
+        );
+    }
+
+    #[test]
+    fn test_set_forward_active_out_of_bounds() {
+        let mut state = AppState::new("host".to_string());
+        state.update_ports(vec![make_port(8080, "nginx")]);
+        state.set_forward_active(5, 9090); // should not panic
+        assert_eq!(state.ports[0].forward_status, ForwardStatus::Idle);
+    }
+
+    // ---- set_forward_idle ----
+
+    #[test]
+    fn test_set_forward_idle() {
+        let mut state = AppState::new("host".to_string());
+        state.update_ports(vec![make_port(8080, "nginx")]);
+        state.set_forward_active(0, 8080);
+        state.set_forward_idle(0);
+        assert_eq!(state.ports[0].forward_status, ForwardStatus::Idle);
+    }
+
+    #[test]
+    fn test_set_forward_idle_out_of_bounds() {
+        let mut state = AppState::new("host".to_string());
+        state.update_ports(vec![make_port(8080, "nginx")]);
+        state.set_forward_idle(5); // should not panic
+        assert_eq!(state.ports[0].forward_status, ForwardStatus::Idle);
+    }
+
+    // ---- set_forward_error ----
+
+    #[test]
+    fn test_set_forward_error() {
+        let mut state = AppState::new("host".to_string());
+        state.update_ports(vec![make_port(8080, "nginx")]);
+        state.set_forward_error(0, "port in use".to_string());
+        assert_eq!(
+            state.ports[0].forward_status,
+            ForwardStatus::Error("port in use".to_string())
+        );
+    }
+
+    #[test]
+    fn test_set_forward_error_out_of_bounds() {
+        let mut state = AppState::new("host".to_string());
+        state.update_ports(vec![make_port(8080, "nginx")]);
+        state.set_forward_error(5, "oops".to_string()); // should not panic
+        assert_eq!(state.ports[0].forward_status, ForwardStatus::Idle);
+    }
+
+    // ---- update_ports edge cases ----
+
+    #[test]
+    fn test_update_ports_to_empty() {
+        let mut state = AppState::new("host".to_string());
+        state.update_ports(vec![make_port(8080, "a")]);
+        state.update_ports(vec![]);
+        assert!(state.ports.is_empty());
+    }
+
+    #[test]
+    fn test_update_ports_preserves_error_state() {
+        let mut state = AppState::new("host".to_string());
+        state.update_ports(vec![make_port(8080, "nginx")]);
+        state.set_forward_error(0, "conflict".to_string());
+        state.update_ports(vec![make_port(8080, "nginx")]);
+        assert_eq!(
+            state.ports[0].forward_status,
+            ForwardStatus::Error("conflict".to_string())
+        );
+    }
+
+    #[test]
+    fn test_update_ports_same_port_different_bind_addr() {
+        let mut state = AppState::new("host".to_string());
+        let p1 = DiscoveredPort {
+            port: 8080,
+            bind_address: "0.0.0.0".to_string(),
+            process_name: Some("nginx".to_string()),
+            pid: Some(1),
+        };
+        state.update_ports(vec![p1]);
+        state.set_forward_active(0, 8080);
+
+        // Same port but different bind address — should NOT preserve forward state
+        let p2 = DiscoveredPort {
+            port: 8080,
+            bind_address: "::".to_string(),
+            process_name: Some("nginx".to_string()),
+            pid: Some(1),
+        };
+        state.update_ports(vec![p2]);
+        assert_eq!(state.ports[0].forward_status, ForwardStatus::Idle);
+    }
+
+    // ---- navigation edge cases ----
+
+    #[test]
+    fn test_move_on_empty_state() {
+        let mut state = AppState::new("host".to_string());
+        state.move_up();
+        assert_eq!(state.selected, 0);
+        state.move_down();
+        assert_eq!(state.selected, 0);
+    }
+
+    #[test]
+    fn test_move_on_single_port() {
+        let mut state = AppState::new("host".to_string());
+        state.update_ports(vec![make_port(8080, "a")]);
+        state.move_down();
+        assert_eq!(state.selected, 0); // can't go past single item
+        state.move_up();
+        assert_eq!(state.selected, 0);
+    }
 }
