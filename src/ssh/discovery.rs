@@ -242,4 +242,165 @@ tcp6       0      0 :::8080                 :::*                    LISTEN      
         assert_eq!(ports[1].port, 8080);
         assert_eq!(ports[1].bind_address, "::");
     }
+
+    // ---- Display trait ----
+
+    #[test]
+    fn test_display_with_process_name() {
+        let port = DiscoveredPort {
+            port: 8080,
+            bind_address: "0.0.0.0".to_string(),
+            process_name: Some("nginx".to_string()),
+            pid: Some(100),
+        };
+        assert_eq!(format!("{}", port), "0.0.0.0:8080 (nginx)");
+    }
+
+    #[test]
+    fn test_display_without_process_name() {
+        let port = DiscoveredPort {
+            port: 3000,
+            bind_address: "::".to_string(),
+            process_name: None,
+            pid: None,
+        };
+        assert_eq!(format!("{}", port), ":::3000 (unknown)");
+    }
+
+    // ---- parse_address_port direct tests ----
+
+    #[test]
+    fn test_parse_address_port_ipv4() {
+        let (host, port) = parse_address_port("0.0.0.0:8080");
+        assert_eq!(host, "0.0.0.0");
+        assert_eq!(port, Some(8080));
+    }
+
+    #[test]
+    fn test_parse_address_port_ipv6_bracket() {
+        let (host, port) = parse_address_port("[::]:443");
+        assert_eq!(host, "::");
+        assert_eq!(port, Some(443));
+    }
+
+    #[test]
+    fn test_parse_address_port_ipv6_localhost() {
+        let (host, port) = parse_address_port("[::1]:5432");
+        assert_eq!(host, "::1");
+        assert_eq!(port, Some(5432));
+    }
+
+    #[test]
+    fn test_parse_address_port_no_colon() {
+        let (host, port) = parse_address_port("somehost");
+        assert_eq!(host, "somehost");
+        assert_eq!(port, None);
+    }
+
+    #[test]
+    fn test_parse_address_port_invalid_port() {
+        let (host, port) = parse_address_port("0.0.0.0:notaport");
+        assert_eq!(host, "0.0.0.0");
+        assert_eq!(port, None);
+    }
+
+    // ---- parse_ss_process_info direct tests ----
+
+    #[test]
+    fn test_parse_ss_process_info_normal() {
+        let (name, pid) = parse_ss_process_info("users:((\"python3\",pid=1234,fd=5))");
+        assert_eq!(name.as_deref(), Some("python3"));
+        assert_eq!(pid, Some(1234));
+    }
+
+    #[test]
+    fn test_parse_ss_process_info_no_quotes() {
+        let (name, pid) = parse_ss_process_info("users:((pid=999))");
+        assert_eq!(name, None);
+        assert_eq!(pid, Some(999));
+    }
+
+    #[test]
+    fn test_parse_ss_process_info_empty() {
+        let (name, pid) = parse_ss_process_info("");
+        assert_eq!(name, None);
+        assert_eq!(pid, None);
+    }
+
+    // ---- ss output edge cases ----
+
+    #[test]
+    fn test_parse_ss_skips_non_listen_lines() {
+        let output = "\
+State  Recv-Q Send-Q Local Address:Port  Peer Address:Port Process
+ESTAB  0      128          0.0.0.0:8080       10.0.0.1:4321
+TIME-WAIT 0   0           0.0.0.0:9090       10.0.0.2:5555
+LISTEN 0      128          0.0.0.0:3000       0.0.0.0:*
+";
+        let ports = parse_ss_output(output);
+        assert_eq!(ports.len(), 1);
+        assert_eq!(ports[0].port, 3000);
+    }
+
+    #[test]
+    fn test_parse_ss_mixed_ipv4_and_ipv6() {
+        let output = "\
+State  Recv-Q Send-Q Local Address:Port  Peer Address:Port Process
+LISTEN 0      128          0.0.0.0:8080      0.0.0.0:*    users:((\"web\",pid=1,fd=3))
+LISTEN 0      128             [::]:8080         [::]:*    users:((\"web\",pid=1,fd=4))
+LISTEN 0      128        127.0.0.1:9090      0.0.0.0:*    users:((\"local\",pid=2,fd=5))
+LISTEN 0      128            [::1]:9090         [::]:*    users:((\"local\",pid=2,fd=6))
+";
+        let ports = parse_ss_output(output);
+        assert_eq!(ports.len(), 2);
+        assert_eq!(ports[0].bind_address, "0.0.0.0");
+        assert_eq!(ports[1].bind_address, "::");
+    }
+
+    // ---- netstat edge cases ----
+
+    #[test]
+    fn test_parse_netstat_no_pid() {
+        let output = "\
+Proto Recv-Q Send-Q Local Address           Foreign Address         State       PID/Program name
+tcp        0      0 0.0.0.0:80              0.0.0.0:*               LISTEN      -
+";
+        let ports = parse_netstat_output(output);
+        assert_eq!(ports.len(), 1);
+        assert_eq!(ports[0].port, 80);
+        assert_eq!(ports[0].process_name, None);
+        assert_eq!(ports[0].pid, None);
+    }
+
+    #[test]
+    fn test_parse_netstat_filters_localhost() {
+        let output = "\
+Proto Recv-Q Send-Q Local Address           Foreign Address         State       PID/Program name
+tcp        0      0 127.0.0.1:3306          0.0.0.0:*               LISTEN      500/mysqld
+";
+        let ports = parse_netstat_output(output);
+        assert!(ports.is_empty());
+    }
+
+    #[test]
+    fn test_parse_netstat_skips_non_listen() {
+        let output = "\
+Proto Recv-Q Send-Q Local Address           Foreign Address         State       PID/Program name
+tcp        0      0 0.0.0.0:80              10.0.0.1:4321           ESTABLISHED 100/nginx
+tcp        0      0 0.0.0.0:443             0.0.0.0:*               LISTEN      100/nginx
+";
+        let ports = parse_netstat_output(output);
+        assert_eq!(ports.len(), 1);
+        assert_eq!(ports[0].port, 443);
+    }
+
+    #[test]
+    fn test_parse_netstat_empty() {
+        let output = "\
+Active Internet connections (only servers)
+Proto Recv-Q Send-Q Local Address           Foreign Address         State       PID/Program name
+";
+        let ports = parse_netstat_output(output);
+        assert!(ports.is_empty());
+    }
 }
