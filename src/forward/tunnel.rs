@@ -8,16 +8,57 @@ use tokio_util::sync::CancellationToken;
 
 use crate::ssh::connection::SshSession;
 
+/// Tracks active port forwards and their cancellation tokens.
+/// Separated from ForwardManager to enable independent testing.
+pub struct ForwardTracker {
+    active: HashMap<u16, CancellationToken>,
+}
+
+impl ForwardTracker {
+    pub fn new() -> Self {
+        Self {
+            active: HashMap::new(),
+        }
+    }
+
+    pub fn insert(&mut self, remote_port: u16, token: CancellationToken) {
+        self.active.insert(remote_port, token);
+    }
+
+    pub fn stop(&mut self, remote_port: u16) -> bool {
+        if let Some(token) = self.active.remove(&remote_port) {
+            token.cancel();
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn stop_all(&mut self) {
+        for (_, token) in self.active.drain() {
+            token.cancel();
+        }
+    }
+
+    pub fn is_forwarding(&self, remote_port: u16) -> bool {
+        self.active.contains_key(&remote_port)
+    }
+
+    pub fn count(&self) -> usize {
+        self.active.len()
+    }
+}
+
 pub struct ForwardManager {
     session: Arc<SshSession>,
-    active_forwards: HashMap<u16, CancellationToken>,
+    tracker: ForwardTracker,
 }
 
 impl ForwardManager {
     pub fn new(session: Arc<SshSession>) -> Self {
         Self {
             session,
-            active_forwards: HashMap::new(),
+            tracker: ForwardTracker::new(),
         }
     }
 
@@ -71,22 +112,18 @@ impl ForwardManager {
             }
         });
 
-        self.active_forwards.insert(remote_port, token);
+        self.tracker.insert(remote_port, token);
         Ok(actual_port)
     }
 
     /// Stop forwarding a remote port.
     pub fn stop_forward(&mut self, remote_port: u16) {
-        if let Some(token) = self.active_forwards.remove(&remote_port) {
-            token.cancel();
-        }
+        self.tracker.stop(remote_port);
     }
 
     /// Stop all active forwards.
     pub fn stop_all(&mut self) {
-        for (_, token) in self.active_forwards.drain() {
-            token.cancel();
-        }
+        self.tracker.stop_all();
     }
 }
 
@@ -130,4 +167,137 @@ async fn handle_connection(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::net::TcpListener;
+
+    // ---- ForwardTracker tests ----
+
+    #[test]
+    fn test_tracker_new_is_empty() {
+        let tracker = ForwardTracker::new();
+        assert_eq!(tracker.count(), 0);
+        assert!(!tracker.is_forwarding(8080));
+    }
+
+    #[test]
+    fn test_tracker_insert_and_query() {
+        let mut tracker = ForwardTracker::new();
+        let token = CancellationToken::new();
+        tracker.insert(8080, token);
+        assert!(tracker.is_forwarding(8080));
+        assert!(!tracker.is_forwarding(3000));
+        assert_eq!(tracker.count(), 1);
+    }
+
+    #[test]
+    fn test_tracker_stop_existing() {
+        let mut tracker = ForwardTracker::new();
+        let token = CancellationToken::new();
+        let child = token.clone();
+        tracker.insert(8080, token);
+
+        let removed = tracker.stop(8080);
+        assert!(removed);
+        assert!(!tracker.is_forwarding(8080));
+        assert_eq!(tracker.count(), 0);
+        assert!(child.is_cancelled());
+    }
+
+    #[test]
+    fn test_tracker_stop_nonexistent() {
+        let mut tracker = ForwardTracker::new();
+        let removed = tracker.stop(9999);
+        assert!(!removed);
+    }
+
+    #[test]
+    fn test_tracker_stop_all() {
+        let mut tracker = ForwardTracker::new();
+        let t1 = CancellationToken::new();
+        let t2 = CancellationToken::new();
+        let c1 = t1.clone();
+        let c2 = t2.clone();
+        tracker.insert(8080, t1);
+        tracker.insert(3000, t2);
+        assert_eq!(tracker.count(), 2);
+
+        tracker.stop_all();
+        assert_eq!(tracker.count(), 0);
+        assert!(c1.is_cancelled());
+        assert!(c2.is_cancelled());
+    }
+
+    #[test]
+    fn test_tracker_stop_all_empty() {
+        let mut tracker = ForwardTracker::new();
+        tracker.stop_all(); // should not panic
+        assert_eq!(tracker.count(), 0);
+    }
+
+    #[test]
+    fn test_tracker_insert_overwrites() {
+        let mut tracker = ForwardTracker::new();
+        let t1 = CancellationToken::new();
+        let c1 = t1.clone();
+        tracker.insert(8080, t1);
+
+        let t2 = CancellationToken::new();
+        tracker.insert(8080, t2);
+        assert_eq!(tracker.count(), 1);
+        // Old token is NOT auto-cancelled (the HashMap just drops it)
+        assert!(!c1.is_cancelled());
+    }
+
+    #[test]
+    fn test_tracker_multiple_ports() {
+        let mut tracker = ForwardTracker::new();
+        tracker.insert(8080, CancellationToken::new());
+        tracker.insert(3000, CancellationToken::new());
+        tracker.insert(5000, CancellationToken::new());
+        assert_eq!(tracker.count(), 3);
+
+        tracker.stop(3000);
+        assert_eq!(tracker.count(), 2);
+        assert!(tracker.is_forwarding(8080));
+        assert!(!tracker.is_forwarding(3000));
+        assert!(tracker.is_forwarding(5000));
+    }
+
+    // ---- Port binding tests ----
+
+    #[tokio::test]
+    async fn test_bind_port_zero_gets_os_port() {
+        let listener = TcpListener::bind(("127.0.0.1", 0u16)).await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        assert!(port > 0);
+    }
+
+    #[tokio::test]
+    async fn test_bind_port_conflict() {
+        // Bind a port
+        let listener = TcpListener::bind(("127.0.0.1", 0u16)).await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        // Try to bind the same port — should fail
+        let result = TcpListener::bind(("127.0.0.1", port)).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_bind_releases_on_drop() {
+        let port;
+        {
+            let listener = TcpListener::bind(("127.0.0.1", 0u16)).await.unwrap();
+            port = listener.local_addr().unwrap().port();
+            // listener drops here
+        }
+
+        // Should be able to rebind after drop
+        let result = TcpListener::bind(("127.0.0.1", port)).await;
+        assert!(result.is_ok());
+    }
 }
