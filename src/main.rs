@@ -125,6 +125,19 @@ async fn run_loop(
                             }
                         }
                     }
+                    Action::OpenBrowser(port) => {
+                        let url = format!("http://localhost:{}", port);
+                        match open::that(&url) {
+                            Ok(_) => {
+                                state.status_message =
+                                    Some(format!("Opened {}", url));
+                            }
+                            Err(e) => {
+                                state.status_message =
+                                    Some(format!("Failed to open browser: {}", e));
+                            }
+                        }
+                    }
                     Action::Reconnect => {
                         state.status_message =
                             Some("Reconnect not yet implemented".to_string());

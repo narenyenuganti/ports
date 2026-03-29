@@ -212,6 +212,8 @@ fn render_help_bar(f: &mut Frame, state: &AppState, area: Rect) {
             ViewMode::Remote => Line::from(vec![
                 Span::styled("[enter]", Style::default().add_modifier(Modifier::BOLD)),
                 Span::raw(" toggle  "),
+                Span::styled("[o]", Style::default().add_modifier(Modifier::BOLD)),
+                Span::raw(" open  "),
                 Span::styled("[r]", Style::default().add_modifier(Modifier::BOLD)),
                 Span::raw(" refresh  "),
                 Span::styled("[p]", Style::default().add_modifier(Modifier::BOLD)),
@@ -226,6 +228,8 @@ fn render_help_bar(f: &mut Frame, state: &AppState, area: Rect) {
                 Span::raw(" quit"),
             ]),
             ViewMode::Local => Line::from(vec![
+                Span::styled("[o]", Style::default().add_modifier(Modifier::BOLD)),
+                Span::raw(" open  "),
                 Span::styled("[tab]", Style::default().add_modifier(Modifier::BOLD)),
                 Span::raw(" remote  "),
                 Span::styled("[r]", Style::default().add_modifier(Modifier::BOLD)),

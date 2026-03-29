@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
-use super::app::{AppState, InputMode, SortState, ViewMode};
+use super::app::{AppState, ForwardStatus, InputMode, SortState, ViewMode};
 
 /// Actions the event loop should perform after handling input.
 #[derive(Debug)]
@@ -11,6 +11,7 @@ pub enum Action {
     StartForwardWithPort(usize, u16),
     Refresh,
     Reconnect,
+    OpenBrowser(u16),
 }
 
 pub fn handle_key(state: &mut AppState, key: KeyEvent) -> Action {
@@ -59,6 +60,17 @@ fn handle_remote_mode(state: &mut AppState, key: KeyEvent) -> Action {
             }
             Action::None
         }
+        KeyCode::Char('o') => {
+            if let Some(entry) = state.ports.get(state.selected) {
+                let port = match &entry.forward_status {
+                    ForwardStatus::Active { local_port } => *local_port,
+                    _ => entry.discovered.port,
+                };
+                Action::OpenBrowser(port)
+            } else {
+                Action::None
+            }
+        }
         KeyCode::Char('s') => {
             state.sort.column = 0;
             state.input_mode = InputMode::SortSelect;
@@ -77,6 +89,13 @@ fn handle_local_mode(state: &mut AppState, key: KeyEvent) -> Action {
         KeyCode::Down | KeyCode::Char('j') => {
             state.local_move_down();
             Action::None
+        }
+        KeyCode::Char('o') => {
+            if let Some(port) = state.local_ports.get(state.local_selected) {
+                Action::OpenBrowser(port.port)
+            } else {
+                Action::None
+            }
         }
         KeyCode::Char('s') => {
             state.sort.column = 0;
@@ -572,5 +591,66 @@ mod tests {
         handle_key(&mut state, key(KeyCode::Char('s')));
         handle_key(&mut state, key(KeyCode::Char('r')));
         assert_eq!(state.sort.active, None);
+    }
+
+    // ---- Open browser tests ----
+
+    #[test]
+    fn test_o_opens_browser_remote_idle() {
+        let mut state = state_with_ports();
+        state.selected = 0;
+        let action = handle_key(&mut state, key(KeyCode::Char('o')));
+        // Port 8080 is idle, so uses the remote port number
+        assert!(matches!(action, Action::OpenBrowser(8080)));
+    }
+
+    #[test]
+    fn test_o_opens_browser_remote_active_uses_local_port() {
+        let mut state = state_with_ports();
+        state.set_forward_active(0, 9090);
+        state.selected = 0;
+        let action = handle_key(&mut state, key(KeyCode::Char('o')));
+        // Port is forwarded to local 9090, so opens that
+        assert!(matches!(action, Action::OpenBrowser(9090)));
+    }
+
+    #[test]
+    fn test_o_opens_browser_remote_error_uses_remote_port() {
+        let mut state = state_with_ports();
+        state.set_forward_error(0, "conflict".to_string());
+        state.selected = 0;
+        let action = handle_key(&mut state, key(KeyCode::Char('o')));
+        assert!(matches!(action, Action::OpenBrowser(8080)));
+    }
+
+    #[test]
+    fn test_o_on_empty_remote_is_noop() {
+        let mut state = AppState::new("host".to_string());
+        let action = handle_key(&mut state, key(KeyCode::Char('o')));
+        assert!(matches!(action, Action::None));
+    }
+
+    #[test]
+    fn test_o_opens_browser_local() {
+        let mut state = state_with_local_ports();
+        state.local_selected = 1; // port 5000
+        let action = handle_key(&mut state, key(KeyCode::Char('o')));
+        assert!(matches!(action, Action::OpenBrowser(5000)));
+    }
+
+    #[test]
+    fn test_o_on_empty_local_is_noop() {
+        let mut state = AppState::new("host".to_string());
+        state.view_mode = ViewMode::Local;
+        let action = handle_key(&mut state, key(KeyCode::Char('o')));
+        assert!(matches!(action, Action::None));
+    }
+
+    #[test]
+    fn test_o_remote_selected_second_port() {
+        let mut state = state_with_ports();
+        state.selected = 1; // port 3000
+        let action = handle_key(&mut state, key(KeyCode::Char('o')));
+        assert!(matches!(action, Action::OpenBrowser(3000)));
     }
 }
