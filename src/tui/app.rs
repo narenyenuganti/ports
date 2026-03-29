@@ -28,12 +28,71 @@ pub enum InputMode {
     Normal,
     /// User is typing a port number override
     PortInput(String),
+    /// User is selecting a column to sort by
+    SortSelect,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ViewMode {
     Remote,
     Local,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SortOrder {
+    Ascending,
+    Descending,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SortState {
+    /// Which column index is highlighted in sort mode
+    pub column: usize,
+    /// Active sort: (column index, order). None means default (port ascending).
+    pub active: Option<(usize, SortOrder)>,
+}
+
+impl SortState {
+    pub fn new() -> Self {
+        Self {
+            column: 0,
+            active: None,
+        }
+    }
+
+    pub fn column_count_remote() -> usize {
+        5 // Status, Port, Local Address, Process, PID
+    }
+
+    pub fn column_count_local() -> usize {
+        4 // Bind Address, Port, Process, PID
+    }
+
+    pub fn move_left(&mut self) {
+        if self.column > 0 {
+            self.column -= 1;
+        }
+    }
+
+    pub fn move_right(&mut self, max_cols: usize) {
+        if self.column + 1 < max_cols {
+            self.column += 1;
+        }
+    }
+
+    pub fn toggle_sort(&mut self) {
+        self.active = match self.active {
+            Some((col, SortOrder::Ascending)) if col == self.column => {
+                Some((col, SortOrder::Descending))
+            }
+            Some((col, SortOrder::Descending)) if col == self.column => None,
+            _ => Some((self.column, SortOrder::Ascending)),
+        };
+    }
+
+    pub fn reset(&mut self) {
+        self.active = None;
+    }
 }
 
 pub struct AppState {
@@ -46,6 +105,7 @@ pub struct AppState {
     pub view_mode: ViewMode,
     pub local_ports: Vec<DiscoveredPort>,
     pub local_selected: usize,
+    pub sort: SortState,
 }
 
 impl AppState {
@@ -60,6 +120,7 @@ impl AppState {
             view_mode: ViewMode::Remote,
             local_ports: Vec::new(),
             local_selected: 0,
+            sort: SortState::new(),
         }
     }
 
@@ -144,6 +205,64 @@ impl AppState {
         if self.local_selected + 1 < self.local_ports.len() {
             self.local_selected += 1;
         }
+    }
+
+    /// Return remote ports sorted according to current sort state.
+    pub fn sorted_ports(&self) -> Vec<&PortEntry> {
+        let mut entries: Vec<&PortEntry> = self.ports.iter().collect();
+        if let Some((col, order)) = &self.sort.active {
+            entries.sort_by(|a, b| {
+                let cmp = match col {
+                    0 => {
+                        // Status: Active > Error > Idle
+                        let rank = |s: &ForwardStatus| match s {
+                            ForwardStatus::Active { .. } => 2,
+                            ForwardStatus::Error(_) => 1,
+                            ForwardStatus::Idle => 0,
+                        };
+                        rank(&a.forward_status).cmp(&rank(&b.forward_status))
+                    }
+                    1 => a.discovered.port.cmp(&b.discovered.port),
+                    3 => {
+                        let a_name = a.discovered.process_name.as_deref().unwrap_or("");
+                        let b_name = b.discovered.process_name.as_deref().unwrap_or("");
+                        a_name.to_lowercase().cmp(&b_name.to_lowercase())
+                    }
+                    4 => a.discovered.pid.unwrap_or(0).cmp(&b.discovered.pid.unwrap_or(0)),
+                    _ => std::cmp::Ordering::Equal, // Local Address (col 2) not sortable
+                };
+                match order {
+                    SortOrder::Ascending => cmp,
+                    SortOrder::Descending => cmp.reverse(),
+                }
+            });
+        }
+        entries
+    }
+
+    /// Return local ports sorted according to current sort state.
+    pub fn sorted_local_ports(&self) -> Vec<&DiscoveredPort> {
+        let mut entries: Vec<&DiscoveredPort> = self.local_ports.iter().collect();
+        if let Some((col, order)) = &self.sort.active {
+            entries.sort_by(|a, b| {
+                let cmp = match col {
+                    0 => a.bind_address.cmp(&b.bind_address),
+                    1 => a.port.cmp(&b.port),
+                    2 => {
+                        let a_name = a.process_name.as_deref().unwrap_or("");
+                        let b_name = b.process_name.as_deref().unwrap_or("");
+                        a_name.to_lowercase().cmp(&b_name.to_lowercase())
+                    }
+                    3 => a.pid.unwrap_or(0).cmp(&b.pid.unwrap_or(0)),
+                    _ => std::cmp::Ordering::Equal,
+                };
+                match order {
+                    SortOrder::Ascending => cmp,
+                    SortOrder::Descending => cmp.reverse(),
+                }
+            });
+        }
+        entries
     }
 }
 
@@ -485,5 +604,169 @@ mod tests {
         assert_eq!(state.local_selected, 0);
         state.local_move_up();
         assert_eq!(state.local_selected, 0);
+    }
+
+    // ---- SortState tests ----
+
+    #[test]
+    fn test_sort_state_new() {
+        let sort = SortState::new();
+        assert_eq!(sort.column, 0);
+        assert_eq!(sort.active, None);
+    }
+
+    #[test]
+    fn test_sort_move_left_right() {
+        let mut sort = SortState::new();
+        sort.move_right(5);
+        assert_eq!(sort.column, 1);
+        sort.move_right(5);
+        assert_eq!(sort.column, 2);
+        sort.move_left();
+        assert_eq!(sort.column, 1);
+    }
+
+    #[test]
+    fn test_sort_move_left_at_zero() {
+        let mut sort = SortState::new();
+        sort.move_left();
+        assert_eq!(sort.column, 0);
+    }
+
+    #[test]
+    fn test_sort_move_right_at_max() {
+        let mut sort = SortState::new();
+        sort.column = 4;
+        sort.move_right(5);
+        assert_eq!(sort.column, 4);
+    }
+
+    #[test]
+    fn test_sort_toggle_ascending_descending_none() {
+        let mut sort = SortState::new();
+        sort.column = 1;
+
+        // First toggle: ascending
+        sort.toggle_sort();
+        assert_eq!(sort.active, Some((1, SortOrder::Ascending)));
+
+        // Second toggle: descending
+        sort.toggle_sort();
+        assert_eq!(sort.active, Some((1, SortOrder::Descending)));
+
+        // Third toggle: none (reset)
+        sort.toggle_sort();
+        assert_eq!(sort.active, None);
+    }
+
+    #[test]
+    fn test_sort_toggle_different_column() {
+        let mut sort = SortState::new();
+        sort.column = 1;
+        sort.toggle_sort();
+        assert_eq!(sort.active, Some((1, SortOrder::Ascending)));
+
+        // Move to different column and toggle — starts fresh ascending
+        sort.column = 3;
+        sort.toggle_sort();
+        assert_eq!(sort.active, Some((3, SortOrder::Ascending)));
+    }
+
+    #[test]
+    fn test_sort_reset() {
+        let mut sort = SortState::new();
+        sort.column = 2;
+        sort.toggle_sort();
+        assert_eq!(sort.active, Some((2, SortOrder::Ascending)));
+        sort.reset();
+        assert_eq!(sort.active, None);
+    }
+
+    #[test]
+    fn test_sorted_ports_default_order() {
+        let mut state = AppState::new("host".to_string());
+        state.update_ports(vec![make_port(8080, "nginx"), make_port(3000, "node")]);
+        let sorted = state.sorted_ports();
+        // No active sort — original order preserved
+        assert_eq!(sorted[0].discovered.port, 8080);
+        assert_eq!(sorted[1].discovered.port, 3000);
+    }
+
+    #[test]
+    fn test_sorted_ports_by_port_ascending() {
+        let mut state = AppState::new("host".to_string());
+        state.update_ports(vec![
+            make_port(8080, "nginx"),
+            make_port(3000, "node"),
+            make_port(5000, "python"),
+        ]);
+        state.sort.active = Some((1, SortOrder::Ascending));
+        let sorted = state.sorted_ports();
+        assert_eq!(sorted[0].discovered.port, 3000);
+        assert_eq!(sorted[1].discovered.port, 5000);
+        assert_eq!(sorted[2].discovered.port, 8080);
+    }
+
+    #[test]
+    fn test_sorted_ports_by_port_descending() {
+        let mut state = AppState::new("host".to_string());
+        state.update_ports(vec![
+            make_port(8080, "nginx"),
+            make_port(3000, "node"),
+            make_port(5000, "python"),
+        ]);
+        state.sort.active = Some((1, SortOrder::Descending));
+        let sorted = state.sorted_ports();
+        assert_eq!(sorted[0].discovered.port, 8080);
+        assert_eq!(sorted[1].discovered.port, 5000);
+        assert_eq!(sorted[2].discovered.port, 3000);
+    }
+
+    #[test]
+    fn test_sorted_ports_by_process_name() {
+        let mut state = AppState::new("host".to_string());
+        state.update_ports(vec![
+            make_port(8080, "nginx"),
+            make_port(3000, "apache"),
+            make_port(5000, "Zed"),
+        ]);
+        state.sort.active = Some((3, SortOrder::Ascending));
+        let sorted = state.sorted_ports();
+        assert_eq!(sorted[0].discovered.process_name.as_deref(), Some("apache"));
+        assert_eq!(sorted[1].discovered.process_name.as_deref(), Some("nginx"));
+        assert_eq!(sorted[2].discovered.process_name.as_deref(), Some("Zed"));
+    }
+
+    #[test]
+    fn test_sorted_local_ports_by_port() {
+        let mut state = AppState::new("host".to_string());
+        state.update_local_ports(vec![
+            make_port(8080, "nginx"),
+            make_port(3000, "node"),
+        ]);
+        state.sort.active = Some((1, SortOrder::Ascending));
+        let sorted = state.sorted_local_ports();
+        assert_eq!(sorted[0].port, 3000);
+        assert_eq!(sorted[1].port, 8080);
+    }
+
+    #[test]
+    fn test_sorted_local_ports_by_process() {
+        let mut state = AppState::new("host".to_string());
+        state.update_local_ports(vec![
+            make_port(3000, "zsh"),
+            make_port(8080, "apache"),
+        ]);
+        state.sort.active = Some((2, SortOrder::Ascending));
+        let sorted = state.sorted_local_ports();
+        assert_eq!(sorted[0].process_name.as_deref(), Some("apache"));
+        assert_eq!(sorted[1].process_name.as_deref(), Some("zsh"));
+    }
+
+    #[test]
+    fn test_app_state_defaults_with_sort() {
+        let state = AppState::new("host".to_string());
+        assert_eq!(state.sort.column, 0);
+        assert_eq!(state.sort.active, None);
     }
 }

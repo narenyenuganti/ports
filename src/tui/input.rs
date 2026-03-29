@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
-use super::app::{AppState, InputMode, ViewMode};
+use super::app::{AppState, InputMode, SortState, ViewMode};
 
 /// Actions the event loop should perform after handling input.
 #[derive(Debug)]
@@ -17,6 +17,7 @@ pub fn handle_key(state: &mut AppState, key: KeyEvent) -> Action {
     match &state.input_mode {
         InputMode::Normal => handle_normal_mode(state, key),
         InputMode::PortInput(_) => handle_port_input(state, key),
+        InputMode::SortSelect => handle_sort_select(state, key),
     }
 }
 
@@ -58,6 +59,11 @@ fn handle_remote_mode(state: &mut AppState, key: KeyEvent) -> Action {
             }
             Action::None
         }
+        KeyCode::Char('s') => {
+            state.sort.column = 0;
+            state.input_mode = InputMode::SortSelect;
+            Action::None
+        }
         _ => Action::None,
     }
 }
@@ -70,6 +76,43 @@ fn handle_local_mode(state: &mut AppState, key: KeyEvent) -> Action {
         }
         KeyCode::Down | KeyCode::Char('j') => {
             state.local_move_down();
+            Action::None
+        }
+        KeyCode::Char('s') => {
+            state.sort.column = 0;
+            state.input_mode = InputMode::SortSelect;
+            Action::None
+        }
+        _ => Action::None,
+    }
+}
+
+fn handle_sort_select(state: &mut AppState, key: KeyEvent) -> Action {
+    let max_cols = match state.view_mode {
+        ViewMode::Remote => SortState::column_count_remote(),
+        ViewMode::Local => SortState::column_count_local(),
+    };
+    match key.code {
+        KeyCode::Left => {
+            state.sort.move_left();
+            Action::None
+        }
+        KeyCode::Right => {
+            state.sort.move_right(max_cols);
+            Action::None
+        }
+        KeyCode::Enter => {
+            state.sort.toggle_sort();
+            state.input_mode = InputMode::Normal;
+            Action::None
+        }
+        KeyCode::Char('r') => {
+            state.sort.reset();
+            state.input_mode = InputMode::Normal;
+            Action::None
+        }
+        KeyCode::Esc => {
+            state.input_mode = InputMode::Normal;
             Action::None
         }
         _ => Action::None,
@@ -414,5 +457,120 @@ mod tests {
             Action::None
         ));
         assert_eq!(state.local_selected, 0);
+    }
+
+    // ---- Sort mode tests ----
+
+    use crate::tui::app::SortOrder;
+
+    #[test]
+    fn test_s_enters_sort_mode_remote() {
+        let mut state = state_with_ports();
+        handle_key(&mut state, key(KeyCode::Char('s')));
+        assert_eq!(state.input_mode, InputMode::SortSelect);
+        assert_eq!(state.sort.column, 0);
+    }
+
+    #[test]
+    fn test_s_enters_sort_mode_local() {
+        let mut state = state_with_local_ports();
+        handle_key(&mut state, key(KeyCode::Char('s')));
+        assert_eq!(state.input_mode, InputMode::SortSelect);
+        assert_eq!(state.sort.column, 0);
+    }
+
+    #[test]
+    fn test_sort_left_right_navigation() {
+        let mut state = state_with_ports();
+        state.input_mode = InputMode::SortSelect;
+        handle_key(&mut state, key(KeyCode::Right));
+        assert_eq!(state.sort.column, 1);
+        handle_key(&mut state, key(KeyCode::Right));
+        assert_eq!(state.sort.column, 2);
+        handle_key(&mut state, key(KeyCode::Left));
+        assert_eq!(state.sort.column, 1);
+    }
+
+    #[test]
+    fn test_sort_right_clamps_remote() {
+        let mut state = state_with_ports();
+        state.input_mode = InputMode::SortSelect;
+        state.sort.column = 4; // last remote column (PID)
+        handle_key(&mut state, key(KeyCode::Right));
+        assert_eq!(state.sort.column, 4);
+    }
+
+    #[test]
+    fn test_sort_right_clamps_local() {
+        let mut state = state_with_local_ports();
+        state.input_mode = InputMode::SortSelect;
+        state.sort.column = 3; // last local column (PID)
+        handle_key(&mut state, key(KeyCode::Right));
+        assert_eq!(state.sort.column, 3);
+    }
+
+    #[test]
+    fn test_sort_enter_toggles_and_exits() {
+        let mut state = state_with_ports();
+        state.input_mode = InputMode::SortSelect;
+        state.sort.column = 1; // Port
+        handle_key(&mut state, key(KeyCode::Enter));
+        assert_eq!(state.sort.active, Some((1, SortOrder::Ascending)));
+        assert_eq!(state.input_mode, InputMode::Normal);
+    }
+
+    #[test]
+    fn test_sort_r_resets_and_exits() {
+        let mut state = state_with_ports();
+        state.sort.active = Some((1, SortOrder::Ascending));
+        state.input_mode = InputMode::SortSelect;
+        handle_key(&mut state, key(KeyCode::Char('r')));
+        assert_eq!(state.sort.active, None);
+        assert_eq!(state.input_mode, InputMode::Normal);
+    }
+
+    #[test]
+    fn test_sort_esc_cancels() {
+        let mut state = state_with_ports();
+        state.input_mode = InputMode::SortSelect;
+        state.sort.column = 3;
+        handle_key(&mut state, key(KeyCode::Esc));
+        assert_eq!(state.input_mode, InputMode::Normal);
+        assert_eq!(state.sort.column, 3); // column preserved
+    }
+
+    #[test]
+    fn test_sort_unknown_key_is_noop() {
+        let mut state = state_with_ports();
+        state.input_mode = InputMode::SortSelect;
+        state.sort.column = 2;
+        handle_key(&mut state, key(KeyCode::Char('x')));
+        assert_eq!(state.input_mode, InputMode::SortSelect);
+        assert_eq!(state.sort.column, 2);
+    }
+
+    #[test]
+    fn test_sort_full_cycle_ascending_descending_reset() {
+        let mut state = state_with_ports();
+        // Enter sort mode
+        handle_key(&mut state, key(KeyCode::Char('s')));
+        // Navigate to Port column
+        handle_key(&mut state, key(KeyCode::Right));
+        assert_eq!(state.sort.column, 1);
+        // Toggle ascending
+        handle_key(&mut state, key(KeyCode::Enter));
+        assert_eq!(state.sort.active, Some((1, SortOrder::Ascending)));
+        assert_eq!(state.input_mode, InputMode::Normal);
+
+        // Re-enter sort mode, toggle to descending
+        handle_key(&mut state, key(KeyCode::Char('s')));
+        state.sort.column = 1; // stays on Port
+        handle_key(&mut state, key(KeyCode::Enter));
+        assert_eq!(state.sort.active, Some((1, SortOrder::Descending)));
+
+        // Re-enter and reset
+        handle_key(&mut state, key(KeyCode::Char('s')));
+        handle_key(&mut state, key(KeyCode::Char('r')));
+        assert_eq!(state.sort.active, None);
     }
 }

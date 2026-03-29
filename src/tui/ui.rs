@@ -6,7 +6,7 @@ use ratatui::{
     Frame,
 };
 
-use super::app::{AppState, ConnectionState, ForwardStatus, InputMode, ViewMode};
+use super::app::{AppState, ConnectionState, ForwardStatus, InputMode, SortOrder, SortState, ViewMode};
 
 pub fn render(f: &mut Frame, state: &AppState) {
     let chunks = Layout::vertical([
@@ -60,19 +60,30 @@ fn render_port_table(f: &mut Frame, state: &AppState, area: Rect) {
     }
 }
 
+fn sort_indicator(sort: &SortState, col: usize) -> &'static str {
+    match sort.active {
+        Some((c, SortOrder::Ascending)) if c == col => " ▲",
+        Some((c, SortOrder::Descending)) if c == col => " ▼",
+        _ => "",
+    }
+}
+
 fn render_remote_table(f: &mut Frame, state: &AppState, area: Rect) {
-    let header = Row::new(vec![
-        Cell::from("Status"),
-        Cell::from("Port"),
-        Cell::from("Local Address"),
-        Cell::from("Process"),
-        Cell::from("PID"),
-    ])
+    let col_names = ["Status", "Port", "Local Address", "Process", "PID"];
+    let header = Row::new(
+        col_names
+            .iter()
+            .enumerate()
+            .map(|(i, name)| {
+                Cell::from(format!("{}{}", name, sort_indicator(&state.sort, i)))
+            })
+            .collect::<Vec<_>>(),
+    )
     .style(Style::default().add_modifier(Modifier::BOLD))
     .bottom_margin(1);
 
-    let rows: Vec<Row> = state
-        .ports
+    let sorted = state.sorted_ports();
+    let rows: Vec<Row> = sorted
         .iter()
         .enumerate()
         .map(|(i, entry)| {
@@ -138,17 +149,21 @@ fn render_remote_table(f: &mut Frame, state: &AppState, area: Rect) {
 }
 
 fn render_local_table(f: &mut Frame, state: &AppState, area: Rect) {
-    let header = Row::new(vec![
-        Cell::from("Bind Address"),
-        Cell::from("Port"),
-        Cell::from("Process"),
-        Cell::from("PID"),
-    ])
+    let col_names = ["Bind Address", "Port", "Process", "PID"];
+    let header = Row::new(
+        col_names
+            .iter()
+            .enumerate()
+            .map(|(i, name)| {
+                Cell::from(format!("{}{}", name, sort_indicator(&state.sort, i)))
+            })
+            .collect::<Vec<_>>(),
+    )
     .style(Style::default().add_modifier(Modifier::BOLD))
     .bottom_margin(1);
 
-    let rows: Vec<Row> = state
-        .local_ports
+    let sorted = state.sorted_local_ports();
+    let rows: Vec<Row> = sorted
         .iter()
         .enumerate()
         .map(|(i, port)| {
@@ -201,6 +216,8 @@ fn render_help_bar(f: &mut Frame, state: &AppState, area: Rect) {
                 Span::raw(" refresh  "),
                 Span::styled("[p]", Style::default().add_modifier(Modifier::BOLD)),
                 Span::raw(" change port  "),
+                Span::styled("[s]", Style::default().add_modifier(Modifier::BOLD)),
+                Span::raw(" sort  "),
                 Span::styled("[tab]", Style::default().add_modifier(Modifier::BOLD)),
                 Span::raw(" local  "),
                 Span::styled("[c]", Style::default().add_modifier(Modifier::BOLD)),
@@ -213,6 +230,8 @@ fn render_help_bar(f: &mut Frame, state: &AppState, area: Rect) {
                 Span::raw(" remote  "),
                 Span::styled("[r]", Style::default().add_modifier(Modifier::BOLD)),
                 Span::raw(" refresh  "),
+                Span::styled("[s]", Style::default().add_modifier(Modifier::BOLD)),
+                Span::raw(" sort  "),
                 Span::styled("[q]", Style::default().add_modifier(Modifier::BOLD)),
                 Span::raw(" quit"),
             ]),
@@ -223,6 +242,36 @@ fn render_help_bar(f: &mut Frame, state: &AppState, area: Rect) {
             Span::styled("_", Style::default().add_modifier(Modifier::SLOW_BLINK)),
             Span::raw("  [enter] confirm  [esc] cancel"),
         ]),
+        InputMode::SortSelect => {
+            let col_names: Vec<&str> = match state.view_mode {
+                ViewMode::Remote => vec!["Status", "Port", "Local Addr", "Process", "PID"],
+                ViewMode::Local => vec!["Bind Addr", "Port", "Process", "PID"],
+            };
+            let mut spans = vec![Span::raw(" Sort by: ")];
+            for (i, name) in col_names.iter().enumerate() {
+                let style = if i == state.sort.column {
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+                } else {
+                    Style::default().fg(Color::DarkGray)
+                };
+                spans.push(Span::styled(*name, style));
+                if i + 1 < col_names.len() {
+                    spans.push(Span::raw("  "));
+                }
+            }
+            spans.push(Span::raw("  "));
+            spans.push(Span::styled("[←/→]", Style::default().add_modifier(Modifier::BOLD)));
+            spans.push(Span::raw(" select  "));
+            spans.push(Span::styled("[enter]", Style::default().add_modifier(Modifier::BOLD)));
+            spans.push(Span::raw(" sort  "));
+            spans.push(Span::styled("[r]", Style::default().add_modifier(Modifier::BOLD)));
+            spans.push(Span::raw(" reset  "));
+            spans.push(Span::styled("[esc]", Style::default().add_modifier(Modifier::BOLD)));
+            spans.push(Span::raw(" cancel"));
+            Line::from(spans)
+        }
     };
 
     f.render_widget(
