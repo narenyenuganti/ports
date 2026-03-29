@@ -9,13 +9,13 @@ portfwd <host>
 ```
  portfwd — <host> (connected) [Remote]
 ┌ Remote Ports ────────────────────────────────────────────────┐
-│ Status  Port   Local Address      Process          PID      │
-│                                                             │
-│ ●       7000   localhost:7000     python3          2770     │
-│ ●       18080  localhost:18080    node             2155     │
-│ ○       5990                      redis-server     6854     │
-│ ○       39585                     nginx            6871     │
-│ ○       50000                     redis-server     6854     │
+│ Status  Port   Local Address      Process          PID       │
+│                                                              │
+│ ●       7000   localhost:7000     python3          2770      │
+│ ●       18080  localhost:18080    node             2155      │
+│ ○       5990                      redis-server     6854      │
+│ ○       39585                     nginx            6871      │
+│ ○       50000                     redis-server     6854      │
 └──────────────────────────────────────────────────────────────┘
  [enter] toggle  [o] open  [r] refresh  [p] change port
  [s] sort  [tab] local  [q] quit
