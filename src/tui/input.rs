@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
-use super::app::{AppState, InputMode};
+use super::app::{AppState, InputMode, ViewMode};
 
 /// Actions the event loop should perform after handling input.
 #[derive(Debug)]
@@ -23,6 +23,20 @@ pub fn handle_key(state: &mut AppState, key: KeyEvent) -> Action {
 fn handle_normal_mode(state: &mut AppState, key: KeyEvent) -> Action {
     match key.code {
         KeyCode::Char('q') => Action::Quit,
+        KeyCode::Tab => {
+            state.toggle_view();
+            Action::None
+        }
+        KeyCode::Char('r') => Action::Refresh,
+        _ => match state.view_mode {
+            ViewMode::Remote => handle_remote_mode(state, key),
+            ViewMode::Local => handle_local_mode(state, key),
+        },
+    }
+}
+
+fn handle_remote_mode(state: &mut AppState, key: KeyEvent) -> Action {
+    match key.code {
         KeyCode::Up | KeyCode::Char('k') => {
             state.move_up();
             Action::None
@@ -37,12 +51,25 @@ fn handle_normal_mode(state: &mut AppState, key: KeyEvent) -> Action {
             }
             Action::ToggleForward(state.selected)
         }
-        KeyCode::Char('r') => Action::Refresh,
         KeyCode::Char('c') => Action::Reconnect,
         KeyCode::Char('p') => {
             if !state.ports.is_empty() {
                 state.input_mode = InputMode::PortInput(String::new());
             }
+            Action::None
+        }
+        _ => Action::None,
+    }
+}
+
+fn handle_local_mode(state: &mut AppState, key: KeyEvent) -> Action {
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') => {
+            state.local_move_up();
+            Action::None
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            state.local_move_down();
             Action::None
         }
         _ => Action::None,
@@ -271,5 +298,121 @@ mod tests {
         state.input_mode = InputMode::PortInput("80".to_string());
         handle_key(&mut state, key(KeyCode::Tab));
         assert_eq!(state.input_mode, InputMode::PortInput("80".to_string()));
+    }
+
+    // ---- Local view mode tests ----
+
+    fn state_with_local_ports() -> AppState {
+        let mut state = AppState::new("host".to_string());
+        state.update_local_ports(vec![make_port(3000), make_port(5000), make_port(8080)]);
+        state.view_mode = ViewMode::Local;
+        state
+    }
+
+    #[test]
+    fn test_tab_switches_to_local() {
+        let mut state = state_with_ports();
+        assert!(matches!(
+            handle_key(&mut state, key(KeyCode::Tab)),
+            Action::None
+        ));
+        assert_eq!(state.view_mode, ViewMode::Local);
+    }
+
+    #[test]
+    fn test_tab_switches_back_to_remote() {
+        let mut state = state_with_local_ports();
+        assert!(matches!(
+            handle_key(&mut state, key(KeyCode::Tab)),
+            Action::None
+        ));
+        assert_eq!(state.view_mode, ViewMode::Remote);
+    }
+
+    #[test]
+    fn test_local_navigate_down() {
+        let mut state = state_with_local_ports();
+        handle_key(&mut state, key(KeyCode::Down));
+        assert_eq!(state.local_selected, 1);
+        assert_eq!(state.selected, 0); // remote cursor unchanged
+    }
+
+    #[test]
+    fn test_local_navigate_up() {
+        let mut state = state_with_local_ports();
+        state.local_selected = 2;
+        handle_key(&mut state, key(KeyCode::Up));
+        assert_eq!(state.local_selected, 1);
+    }
+
+    #[test]
+    fn test_local_navigate_j_k() {
+        let mut state = state_with_local_ports();
+        handle_key(&mut state, key(KeyCode::Char('j')));
+        assert_eq!(state.local_selected, 1);
+        handle_key(&mut state, key(KeyCode::Char('k')));
+        assert_eq!(state.local_selected, 0);
+    }
+
+    #[test]
+    fn test_local_enter_is_noop() {
+        let mut state = state_with_local_ports();
+        assert!(matches!(
+            handle_key(&mut state, key(KeyCode::Enter)),
+            Action::None
+        ));
+    }
+
+    #[test]
+    fn test_local_p_is_noop() {
+        let mut state = state_with_local_ports();
+        handle_key(&mut state, key(KeyCode::Char('p')));
+        assert_eq!(state.input_mode, InputMode::Normal);
+    }
+
+    #[test]
+    fn test_local_c_is_noop() {
+        let mut state = state_with_local_ports();
+        assert!(matches!(
+            handle_key(&mut state, key(KeyCode::Char('c'))),
+            Action::None
+        ));
+    }
+
+    #[test]
+    fn test_local_r_refreshes() {
+        let mut state = state_with_local_ports();
+        assert!(matches!(
+            handle_key(&mut state, key(KeyCode::Char('r'))),
+            Action::Refresh
+        ));
+    }
+
+    #[test]
+    fn test_local_q_quits() {
+        let mut state = state_with_local_ports();
+        assert!(matches!(
+            handle_key(&mut state, key(KeyCode::Char('q'))),
+            Action::Quit
+        ));
+    }
+
+    #[test]
+    fn test_tab_in_port_input_mode_is_noop() {
+        let mut state = state_with_ports();
+        state.input_mode = InputMode::PortInput("80".to_string());
+        handle_key(&mut state, key(KeyCode::Tab));
+        assert_eq!(state.input_mode, InputMode::PortInput("80".to_string()));
+        assert_eq!(state.view_mode, ViewMode::Remote);
+    }
+
+    #[test]
+    fn test_local_unknown_key_is_noop() {
+        let mut state = state_with_local_ports();
+        assert!(matches!(
+            handle_key(&mut state, key(KeyCode::Char('x'))),
+            Action::None
+        ));
+        assert_eq!(state.local_selected, 0);
     }
 }
