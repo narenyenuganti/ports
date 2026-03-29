@@ -6,7 +6,7 @@ use ratatui::{
     Frame,
 };
 
-use super::app::{AppState, ConnectionState, ForwardStatus, InputMode};
+use super::app::{AppState, ConnectionState, ForwardStatus, InputMode, ViewMode};
 
 pub fn render(f: &mut Frame, state: &AppState) {
     let chunks = Layout::vertical([
@@ -28,13 +28,19 @@ fn render_status_bar(f: &mut Frame, state: &AppState, area: Rect) {
         ConnectionState::Reconnecting => ("reconnecting...", Color::Yellow),
     };
 
+    let view_label = match &state.view_mode {
+        ViewMode::Remote => "[Remote]",
+        ViewMode::Local => "[Local]",
+    };
+
     let mut spans = vec![
         Span::styled(" portfwd", Style::default().add_modifier(Modifier::BOLD)),
         Span::raw(" — "),
         Span::raw(&state.host_alias),
         Span::raw(" ("),
         Span::styled(conn_label, Style::default().fg(conn_color)),
-        Span::raw(")"),
+        Span::raw(") "),
+        Span::styled(view_label, Style::default().add_modifier(Modifier::BOLD)),
     ];
 
     if let Some(ref msg) = state.status_message {
@@ -48,6 +54,13 @@ fn render_status_bar(f: &mut Frame, state: &AppState, area: Rect) {
 }
 
 fn render_port_table(f: &mut Frame, state: &AppState, area: Rect) {
+    match state.view_mode {
+        ViewMode::Remote => render_remote_table(f, state, area),
+        ViewMode::Local => render_local_table(f, state, area),
+    }
+}
+
+fn render_remote_table(f: &mut Frame, state: &AppState, area: Rect) {
     let header = Row::new(vec![
         Cell::from("Status"),
         Cell::from("Port"),
@@ -119,25 +132,91 @@ fn render_port_table(f: &mut Frame, state: &AppState, area: Rect) {
         ],
     )
     .header(header)
-    .block(Block::default().borders(Borders::ALL).title(" Ports "));
+    .block(Block::default().borders(Borders::ALL).title(" Remote Ports "));
+
+    f.render_widget(table, area);
+}
+
+fn render_local_table(f: &mut Frame, state: &AppState, area: Rect) {
+    let header = Row::new(vec![
+        Cell::from("Bind Address"),
+        Cell::from("Port"),
+        Cell::from("Process"),
+        Cell::from("PID"),
+    ])
+    .style(Style::default().add_modifier(Modifier::BOLD))
+    .bottom_margin(1);
+
+    let rows: Vec<Row> = state
+        .local_ports
+        .iter()
+        .enumerate()
+        .map(|(i, port)| {
+            let process = port.process_name.as_deref().unwrap_or("-");
+            let pid = port
+                .pid
+                .map(|p| p.to_string())
+                .unwrap_or_else(|| "-".to_string());
+
+            let style = if i == state.local_selected {
+                Style::default()
+                    .bg(Color::DarkGray)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default()
+            };
+
+            Row::new(vec![
+                Cell::from(port.bind_address.clone()),
+                Cell::from(port.port.to_string()),
+                Cell::from(process.to_string()),
+                Cell::from(pid),
+            ])
+            .style(style)
+        })
+        .collect();
+
+    let table = Table::new(
+        rows,
+        [
+            Constraint::Length(16),
+            Constraint::Length(8),
+            Constraint::Min(20),
+            Constraint::Length(10),
+        ],
+    )
+    .header(header)
+    .block(Block::default().borders(Borders::ALL).title(" Local Ports "));
 
     f.render_widget(table, area);
 }
 
 fn render_help_bar(f: &mut Frame, state: &AppState, area: Rect) {
     let help_text = match &state.input_mode {
-        InputMode::Normal => Line::from(vec![
-            Span::styled("[enter]", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(" toggle  "),
-            Span::styled("[r]", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(" refresh  "),
-            Span::styled("[p]", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(" change port  "),
-            Span::styled("[c]", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(" reconnect  "),
-            Span::styled("[q]", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(" quit"),
-        ]),
+        InputMode::Normal => match state.view_mode {
+            ViewMode::Remote => Line::from(vec![
+                Span::styled("[enter]", Style::default().add_modifier(Modifier::BOLD)),
+                Span::raw(" toggle  "),
+                Span::styled("[r]", Style::default().add_modifier(Modifier::BOLD)),
+                Span::raw(" refresh  "),
+                Span::styled("[p]", Style::default().add_modifier(Modifier::BOLD)),
+                Span::raw(" change port  "),
+                Span::styled("[tab]", Style::default().add_modifier(Modifier::BOLD)),
+                Span::raw(" local  "),
+                Span::styled("[c]", Style::default().add_modifier(Modifier::BOLD)),
+                Span::raw(" reconnect  "),
+                Span::styled("[q]", Style::default().add_modifier(Modifier::BOLD)),
+                Span::raw(" quit"),
+            ]),
+            ViewMode::Local => Line::from(vec![
+                Span::styled("[tab]", Style::default().add_modifier(Modifier::BOLD)),
+                Span::raw(" remote  "),
+                Span::styled("[r]", Style::default().add_modifier(Modifier::BOLD)),
+                Span::raw(" refresh  "),
+                Span::styled("[q]", Style::default().add_modifier(Modifier::BOLD)),
+                Span::raw(" quit"),
+            ]),
+        },
         InputMode::PortInput(input) => Line::from(vec![
             Span::raw(" Local port: "),
             Span::styled(input, Style::default().add_modifier(Modifier::BOLD)),
