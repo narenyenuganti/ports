@@ -17,8 +17,8 @@ use std::time::Duration;
 use forward::tunnel::ForwardManager;
 use ssh::config::load_host_config;
 use ssh::connection::SshSession;
-use ssh::discovery::discover_remote_ports;
-use tui::app::{AppState, ForwardStatus};
+use ssh::discovery::{discover_local_ports, discover_remote_ports};
+use tui::app::{AppState, ForwardStatus, ViewMode};
 use tui::input::{handle_key, Action};
 use tui::ui::render;
 
@@ -46,12 +46,17 @@ async fn main() -> Result<()> {
     let session = SshSession::connect(&host_config).await?;
     let session = Arc::new(session);
 
-    // Discover ports
-    let discovered = discover_remote_ports(&session).await?;
+    // Discover ports (remote and local concurrently)
+    let (remote_result, local_ports) = tokio::join!(
+        discover_remote_ports(&session),
+        discover_local_ports()
+    );
+    let discovered = remote_result?;
 
     // Initialize app state
     let mut state = AppState::new(cli.host.clone());
     state.update_ports(discovered);
+    state.update_local_ports(local_ports);
 
     // Initialize forward manager
     let mut fwd_manager = ForwardManager::new(session.clone());
@@ -100,14 +105,23 @@ async fn run_loop(
                     Action::Refresh => {
                         state.status_message = Some("Scanning...".to_string());
                         terminal.draw(|f| render(f, state))?;
-                        match discover_remote_ports(session).await {
-                            Ok(ports) => {
-                                state.update_ports(ports);
-                                state.status_message = None;
+                        match state.view_mode {
+                            ViewMode::Remote => {
+                                match discover_remote_ports(session).await {
+                                    Ok(ports) => {
+                                        state.update_ports(ports);
+                                        state.status_message = None;
+                                    }
+                                    Err(e) => {
+                                        state.status_message =
+                                            Some(format!("Scan failed: {}", e));
+                                    }
+                                }
                             }
-                            Err(e) => {
-                                state.status_message =
-                                    Some(format!("Scan failed: {}", e));
+                            ViewMode::Local => {
+                                let ports = discover_local_ports().await;
+                                state.update_local_ports(ports);
+                                state.status_message = None;
                             }
                         }
                     }
