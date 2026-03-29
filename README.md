@@ -58,7 +58,6 @@ portfwd <host>
 | `s` | Sort by column |
 | `Tab` | Switch between Remote/Local views |
 | `j`/`k` or `Up`/`Down` | Navigate |
-| `c` | Reconnect |
 | `q` | Quit |
 
 ## How it works

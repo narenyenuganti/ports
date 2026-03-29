@@ -138,10 +138,6 @@ async fn run_loop(
                             }
                         }
                     }
-                    Action::Reconnect => {
-                        state.status_message =
-                            Some("Reconnect not yet implemented".to_string());
-                    }
                     Action::None => {}
                 }
             }

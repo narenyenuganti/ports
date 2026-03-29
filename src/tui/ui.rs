@@ -222,8 +222,6 @@ fn render_help_bar(f: &mut Frame, state: &AppState, area: Rect) {
                 Span::raw(" sort  "),
                 Span::styled("[tab]", Style::default().add_modifier(Modifier::BOLD)),
                 Span::raw(" local  "),
-                Span::styled("[c]", Style::default().add_modifier(Modifier::BOLD)),
-                Span::raw(" reconnect  "),
                 Span::styled("[q]", Style::default().add_modifier(Modifier::BOLD)),
                 Span::raw(" quit"),
             ]),

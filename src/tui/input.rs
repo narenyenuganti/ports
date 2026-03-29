@@ -10,7 +10,6 @@ pub enum Action {
     ToggleForward(usize),
     StartForwardWithPort(usize, u16),
     Refresh,
-    Reconnect,
     OpenBrowser(u16),
 }
 
@@ -53,7 +52,6 @@ fn handle_remote_mode(state: &mut AppState, key: KeyEvent) -> Action {
             }
             Action::ToggleForward(state.selected)
         }
-        KeyCode::Char('c') => Action::Reconnect,
         KeyCode::Char('p') => {
             if !state.ports.is_empty() {
                 state.input_mode = InputMode::PortInput(String::new());
@@ -214,12 +212,6 @@ mod tests {
     fn test_refresh() {
         let mut state = AppState::new("host".to_string());
         assert!(matches!(handle_key(&mut state, key(KeyCode::Char('r'))), Action::Refresh));
-    }
-
-    #[test]
-    fn test_reconnect() {
-        let mut state = AppState::new("host".to_string());
-        assert!(matches!(handle_key(&mut state, key(KeyCode::Char('c'))), Action::Reconnect));
     }
 
     #[test]
@@ -430,15 +422,6 @@ mod tests {
         let mut state = state_with_local_ports();
         handle_key(&mut state, key(KeyCode::Char('p')));
         assert_eq!(state.input_mode, InputMode::Normal);
-    }
-
-    #[test]
-    fn test_local_c_is_noop() {
-        let mut state = state_with_local_ports();
-        assert!(matches!(
-            handle_key(&mut state, key(KeyCode::Char('c'))),
-            Action::None
-        ));
     }
 
     #[test]
