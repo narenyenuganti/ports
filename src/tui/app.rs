@@ -134,7 +134,13 @@ impl AppState {
             });
 
             let forward_status = match existing {
-                Some(e) => e.forward_status.clone(),
+                Some(e) => match &e.forward_status {
+                    // Preserve active forwards across refresh
+                    ForwardStatus::Active { .. } => e.forward_status.clone(),
+                    // Clear errors on refresh — conditions may have changed
+                    ForwardStatus::Error(_) => ForwardStatus::Idle,
+                    ForwardStatus::Idle => ForwardStatus::Idle,
+                },
                 None => ForwardStatus::Idle,
             };
 
@@ -438,15 +444,12 @@ mod tests {
     }
 
     #[test]
-    fn test_update_ports_preserves_error_state() {
+    fn test_update_ports_clears_error_state() {
         let mut state = AppState::new("host".to_string());
         state.update_ports(vec![make_port(8080, "nginx")]);
         state.set_forward_error(0, "conflict".to_string());
         state.update_ports(vec![make_port(8080, "nginx")]);
-        assert_eq!(
-            state.ports[0].forward_status,
-            ForwardStatus::Error("conflict".to_string())
-        );
+        assert_eq!(state.ports[0].forward_status, ForwardStatus::Idle);
     }
 
     #[test]
