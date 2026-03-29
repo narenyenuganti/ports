@@ -18,7 +18,7 @@ portfwd <host>
 │ ○        50000                         redis-server         6854  │
 └───────────────────────────────────────────────────────────────────┘
  [enter] toggle  [o] open  [r] refresh  [p] change port  [s] sort
- [tab] local  [c] reconnect  [q] quit
+ [tab] local  [q] quit
 ```
 
 ## Features
