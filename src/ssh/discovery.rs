@@ -1,5 +1,6 @@
 use anyhow::Result;
 use std::fmt;
+use tokio::process::Command;
 
 use super::connection::SshSession;
 
@@ -210,6 +211,61 @@ pub async fn discover_remote_ports(session: &SshSession) -> Result<Vec<Discovere
     // Fall back to netstat
     let output = session.exec("netstat -tlnp 2>/dev/null").await?;
     Ok(parse_netstat_output(&output))
+}
+
+/// Discover listening ports on the local machine.
+/// Uses `lsof` on macOS, `ss`/`netstat` on Linux.
+pub async fn discover_local_ports() -> Vec<DiscoveredPort> {
+    match std::env::consts::OS {
+        "macos" => discover_local_ports_macos().await,
+        _ => discover_local_ports_linux().await,
+    }
+}
+
+async fn discover_local_ports_macos() -> Vec<DiscoveredPort> {
+    let output = Command::new("lsof")
+        .args(["-iTCP", "-sTCP:LISTEN", "-nP"])
+        .output()
+        .await;
+
+    match output {
+        Ok(out) if out.status.success() => {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            parse_lsof_output(&stdout)
+        }
+        _ => Vec::new(),
+    }
+}
+
+async fn discover_local_ports_linux() -> Vec<DiscoveredPort> {
+    // Try ss first
+    let output = Command::new("ss")
+        .args(["-tlnp"])
+        .output()
+        .await;
+
+    if let Ok(out) = output {
+        if out.status.success() {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            if stdout.lines().count() > 1 {
+                return parse_ss_output(&stdout);
+            }
+        }
+    }
+
+    // Fall back to netstat
+    let output = Command::new("netstat")
+        .args(["-tlnp"])
+        .output()
+        .await;
+
+    match output {
+        Ok(out) if out.status.success() => {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            parse_netstat_output(&stdout)
+        }
+        _ => Vec::new(),
+    }
 }
 
 #[cfg(test)]
@@ -589,5 +645,21 @@ node     1234  user   24u IPv4   0x1235 0t0      TCP  0.0.0.0:3000 (LISTEN)
         assert_eq!(ports.len(), 2);
         assert_eq!(ports[0].port, 3000);
         assert_eq!(ports[1].port, 3000);
+    }
+
+    // ---- discover_local_ports integration test ----
+
+    #[tokio::test]
+    async fn test_discover_local_ports_finds_something() {
+        // The test runner itself (or OS services) will have listening ports
+        let ports = discover_local_ports().await;
+        assert!(
+            !ports.is_empty(),
+            "Expected at least one listening port on localhost"
+        );
+        for p in &ports {
+            assert!(p.port > 0);
+            assert!(!p.bind_address.is_empty());
+        }
     }
 }
