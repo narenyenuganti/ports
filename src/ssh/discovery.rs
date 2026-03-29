@@ -149,6 +149,55 @@ fn parse_ss_process_info(info: &str) -> (Option<String>, Option<u32>) {
     (name, pid)
 }
 
+/// Parse `lsof -iTCP -sTCP:LISTEN -nP` output (macOS).
+pub fn parse_lsof_output(output: &str) -> Vec<DiscoveredPort> {
+    let mut ports = Vec::new();
+
+    for line in output.lines().skip(1) {
+        let line = line.trim();
+        if !line.contains("(LISTEN)") {
+            continue;
+        }
+
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() < 9 {
+            continue;
+        }
+
+        let process_name = Some(parts[0].to_string());
+        let pid = parts[1].parse::<u32>().ok();
+
+        // NAME column is second-to-last, e.g. "127.0.0.1:3000" or "[::]:80" or "*:3000"
+        let name_raw = parts[parts.len() - 2];
+
+        // Handle wildcard "*:port" → "0.0.0.0:port"
+        let name_owned;
+        let name = if name_raw.starts_with('*') {
+            name_owned = name_raw.replacen('*', "0.0.0.0", 1);
+            &name_owned
+        } else {
+            name_raw
+        };
+
+        let (bind_address, port) = parse_address_port(name);
+
+        let port = match port {
+            Some(p) => p,
+            None => continue,
+        };
+
+        ports.push(DiscoveredPort {
+            port,
+            bind_address: bind_address.to_string(),
+            process_name,
+            pid,
+        });
+    }
+
+    ports.sort_by_key(|p| p.port);
+    ports
+}
+
 /// Discover listening ports on the remote host via SSH.
 /// Tries `ss -tlnp` first, falls back to `netstat -tlnp`.
 pub async fn discover_remote_ports(session: &SshSession) -> Result<Vec<DiscoveredPort>> {
@@ -414,5 +463,131 @@ Proto Recv-Q Send-Q Local Address           Foreign Address         State       
 ";
         let ports = parse_netstat_output(output);
         assert!(ports.is_empty());
+    }
+
+    // ---- lsof parser tests ----
+
+    #[test]
+    fn test_parse_lsof_basic() {
+        let output = "\
+COMMAND   PID  USER   FD  TYPE   DEVICE SIZE/OFF NODE NAME
+node     1234  user   23u IPv4   0x1234 0t0      TCP  127.0.0.1:3000 (LISTEN)
+nginx     567  root    8u IPv6   0x5678 0t0      TCP  [::]:80 (LISTEN)
+python3  8901  user   10u IPv4   0xabcd 0t0      TCP  0.0.0.0:8080 (LISTEN)
+";
+        let ports = parse_lsof_output(output);
+        assert_eq!(ports.len(), 3);
+        // Sorted by port
+        assert_eq!(ports[0].port, 80);
+        assert_eq!(ports[0].bind_address, "::");
+        assert_eq!(ports[0].process_name.as_deref(), Some("nginx"));
+        assert_eq!(ports[0].pid, Some(567));
+        assert_eq!(ports[1].port, 3000);
+        assert_eq!(ports[1].bind_address, "127.0.0.1");
+        assert_eq!(ports[1].process_name.as_deref(), Some("node"));
+        assert_eq!(ports[1].pid, Some(1234));
+        assert_eq!(ports[2].port, 8080);
+        assert_eq!(ports[2].bind_address, "0.0.0.0");
+        assert_eq!(ports[2].process_name.as_deref(), Some("python3"));
+        assert_eq!(ports[2].pid, Some(8901));
+    }
+
+    #[test]
+    fn test_parse_lsof_ipv6_localhost() {
+        let output = "\
+COMMAND   PID  USER   FD  TYPE   DEVICE SIZE/OFF NODE NAME
+postgres  200  user    4u IPv6   0xaaaa 0t0      TCP  [::1]:5432 (LISTEN)
+";
+        let ports = parse_lsof_output(output);
+        assert_eq!(ports.len(), 1);
+        assert_eq!(ports[0].port, 5432);
+        assert_eq!(ports[0].bind_address, "::1");
+        assert_eq!(ports[0].process_name.as_deref(), Some("postgres"));
+        assert_eq!(ports[0].pid, Some(200));
+    }
+
+    #[test]
+    fn test_parse_lsof_wildcard_star() {
+        let output = "\
+COMMAND   PID  USER   FD  TYPE   DEVICE SIZE/OFF NODE NAME
+node     1234  user   23u IPv4   0x1234 0t0      TCP  *:3000 (LISTEN)
+";
+        let ports = parse_lsof_output(output);
+        assert_eq!(ports.len(), 1);
+        assert_eq!(ports[0].port, 3000);
+        assert_eq!(ports[0].bind_address, "0.0.0.0");
+    }
+
+    #[test]
+    fn test_parse_lsof_skips_non_listen() {
+        let output = "\
+COMMAND   PID  USER   FD  TYPE   DEVICE SIZE/OFF NODE NAME
+node     1234  user   23u IPv4   0x1234 0t0      TCP  127.0.0.1:3000 (ESTABLISHED)
+nginx     567  root    8u IPv4   0x5678 0t0      TCP  0.0.0.0:80 (LISTEN)
+";
+        let ports = parse_lsof_output(output);
+        assert_eq!(ports.len(), 1);
+        assert_eq!(ports[0].port, 80);
+    }
+
+    #[test]
+    fn test_parse_lsof_empty() {
+        let output = "COMMAND   PID  USER   FD  TYPE   DEVICE SIZE/OFF NODE NAME\n";
+        let ports = parse_lsof_output(output);
+        assert!(ports.is_empty());
+    }
+
+    #[test]
+    fn test_parse_lsof_no_output() {
+        let ports = parse_lsof_output("");
+        assert!(ports.is_empty());
+    }
+
+    #[test]
+    fn test_parse_lsof_malformed_line() {
+        let output = "\
+COMMAND   PID  USER   FD  TYPE   DEVICE SIZE/OFF NODE NAME
+this is garbage
+node     1234  user   23u IPv4   0x1234 0t0      TCP  0.0.0.0:8080 (LISTEN)
+";
+        let ports = parse_lsof_output(output);
+        assert_eq!(ports.len(), 1);
+        assert_eq!(ports[0].port, 8080);
+    }
+
+    #[test]
+    fn test_parse_lsof_invalid_port() {
+        let output = "\
+COMMAND   PID  USER   FD  TYPE   DEVICE SIZE/OFF NODE NAME
+node     1234  user   23u IPv4   0x1234 0t0      TCP  0.0.0.0:notaport (LISTEN)
+";
+        let ports = parse_lsof_output(output);
+        assert!(ports.is_empty());
+    }
+
+    #[test]
+    fn test_parse_lsof_invalid_pid() {
+        let output = "\
+COMMAND   PID  USER   FD  TYPE   DEVICE SIZE/OFF NODE NAME
+node     notapid  user   23u IPv4   0x1234 0t0      TCP  0.0.0.0:8080 (LISTEN)
+";
+        let ports = parse_lsof_output(output);
+        assert_eq!(ports.len(), 1);
+        assert_eq!(ports[0].port, 8080);
+        assert_eq!(ports[0].pid, None);
+        assert_eq!(ports[0].process_name.as_deref(), Some("node"));
+    }
+
+    #[test]
+    fn test_parse_lsof_duplicate_ports_different_addresses() {
+        let output = "\
+COMMAND   PID  USER   FD  TYPE   DEVICE SIZE/OFF NODE NAME
+node     1234  user   23u IPv4   0x1234 0t0      TCP  127.0.0.1:3000 (LISTEN)
+node     1234  user   24u IPv4   0x1235 0t0      TCP  0.0.0.0:3000 (LISTEN)
+";
+        let ports = parse_lsof_output(output);
+        assert_eq!(ports.len(), 2);
+        assert_eq!(ports[0].port, 3000);
+        assert_eq!(ports[1].port, 3000);
     }
 }
