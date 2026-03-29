@@ -19,10 +19,6 @@ pub struct PortEntry {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConnectionState {
     Connected,
-    #[allow(dead_code)]
-    Disconnected,
-    #[allow(dead_code)]
-    Reconnecting,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

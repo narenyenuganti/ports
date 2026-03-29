@@ -24,8 +24,6 @@ pub fn render(f: &mut Frame, state: &AppState) {
 fn render_status_bar(f: &mut Frame, state: &AppState, area: Rect) {
     let (conn_label, conn_color) = match &state.connection {
         ConnectionState::Connected => ("connected", Color::Green),
-        ConnectionState::Disconnected => ("disconnected", Color::Red),
-        ConnectionState::Reconnecting => ("reconnecting...", Color::Yellow),
     };
 
     let view_label = match &state.view_mode {
