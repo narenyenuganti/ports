@@ -23,7 +23,7 @@ use tui::input::{handle_key, Action};
 use tui::ui::render;
 
 #[derive(Parser)]
-#[command(name = "portfwd", about = "Lightweight SSH port forwarding TUI")]
+#[command(name = "ports", about = "Lightweight SSH port forwarding TUI")]
 struct Cli {
     /// SSH config host alias to connect to
     host: String,

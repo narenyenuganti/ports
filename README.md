@@ -1,13 +1,13 @@
-# portfwd
+# ports
 
 A lightweight terminal UI for SSH port forwarding. Connect to a remote host, see what's listening, and forward ports — all from one interactive panel.
 
 ```
-portfwd <host>
+ports <host>
 ```
 
 ```
- portfwd — <host> (connected) [Remote]
+ ports — <host> (connected) [Remote]
 ┌ Remote Ports ────────────────────────────────────────────────┐
 │ Status  Port   Local Address      Process          PID       │
 │                                                              │
@@ -35,14 +35,14 @@ portfwd <host>
 
 ```sh
 cargo build --release
-cp target/release/portfwd ~/.local/bin/
+cp target/release/ports ~/.local/bin/
 ```
 
 ## Usage
 
 ```sh
 # Connect using an SSH config host alias
-portfwd <host>
+ports <host>
 
 # That's it. Everything else is in the TUI.
 ```

@@ -1,5 +1,5 @@
 [package]
-name = "portfwd"
+name = "ports"
 version = "0.1.0"
 edition = "2021"
 description = "Lightweight SSH port forwarding TUI"

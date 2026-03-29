@@ -32,7 +32,7 @@ fn render_status_bar(f: &mut Frame, state: &AppState, area: Rect) {
     };
 
     let mut spans = vec![
-        Span::styled(" portfwd", Style::default().add_modifier(Modifier::BOLD)),
+        Span::styled(" ports", Style::default().add_modifier(Modifier::BOLD)),
         Span::raw(" — "),
         Span::raw(&state.host_alias),
         Span::raw(" ("),
