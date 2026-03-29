@@ -19,7 +19,9 @@ pub struct PortEntry {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConnectionState {
     Connected,
+    #[allow(dead_code)]
     Disconnected,
+    #[allow(dead_code)]
     Reconnecting,
 }
 
@@ -159,6 +161,7 @@ impl AppState {
         }
     }
 
+    #[allow(dead_code)]
     pub fn selected_port(&self) -> Option<&PortEntry> {
         self.ports.get(self.selected)
     }

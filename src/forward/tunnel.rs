@@ -40,10 +40,12 @@ impl ForwardTracker {
         }
     }
 
+    #[allow(dead_code)]
     pub fn is_forwarding(&self, remote_port: u16) -> bool {
         self.active.contains_key(&remote_port)
     }
 
+    #[allow(dead_code)]
     pub fn count(&self) -> usize {
         self.active.len()
     }
