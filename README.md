@@ -3,11 +3,11 @@
 A lightweight terminal UI for SSH port forwarding. Connect to a remote host, see what's listening, and forward ports — all from one interactive panel.
 
 ```
-portfwd dev-desktop
+portfwd <host>
 ```
 
 ```
- portfwd — dev-desktop (connected) [Remote]
+ portfwd — <host> (connected) [Remote]
 ┌ Remote Ports ──────────────────────────────────────────────────────┐
 │ Status   Port     Local Address        Process              PID   │
 │                                                                   │
@@ -42,7 +42,7 @@ cp target/release/portfwd ~/.local/bin/
 
 ```sh
 # Connect using an SSH config host alias
-portfwd my-server
+portfwd <host>
 
 # That's it. Everything else is in the TUI.
 ```
