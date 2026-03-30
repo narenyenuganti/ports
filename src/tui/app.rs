@@ -212,6 +212,14 @@ impl AppState {
         }
     }
 
+    /// Map a visual selection index (in the sorted view) to the original
+    /// index in `self.ports`. Returns `None` if out of bounds.
+    pub fn original_port_index(&self, visual_idx: usize) -> Option<usize> {
+        let sorted = self.sorted_ports();
+        let entry = sorted.get(visual_idx)?;
+        self.ports.iter().position(|p| std::ptr::eq(p, *entry))
+    }
+
     /// Return remote ports sorted according to current sort state.
     pub fn sorted_ports(&self) -> Vec<&PortEntry> {
         let mut entries: Vec<&PortEntry> = self.ports.iter().collect();
