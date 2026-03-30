@@ -47,10 +47,11 @@ fn handle_remote_mode(state: &mut AppState, key: KeyEvent) -> Action {
             Action::None
         }
         KeyCode::Enter => {
-            if state.ports.is_empty() {
-                return Action::None;
+            if let Some(orig_idx) = state.original_port_index(state.selected) {
+                Action::ToggleForward(orig_idx)
+            } else {
+                Action::None
             }
-            Action::ToggleForward(state.selected)
         }
         KeyCode::Char('p') => {
             if !state.ports.is_empty() {
@@ -59,7 +60,8 @@ fn handle_remote_mode(state: &mut AppState, key: KeyEvent) -> Action {
             Action::None
         }
         KeyCode::Char('o') => {
-            if let Some(entry) = state.ports.get(state.selected) {
+            let sorted = state.sorted_ports();
+            if let Some(entry) = sorted.get(state.selected) {
                 let port = match &entry.forward_status {
                     ForwardStatus::Active { local_port } => *local_port,
                     _ => entry.discovered.port,
@@ -89,7 +91,8 @@ fn handle_local_mode(state: &mut AppState, key: KeyEvent) -> Action {
             Action::None
         }
         KeyCode::Char('o') => {
-            if let Some(port) = state.local_ports.get(state.local_selected) {
+            let sorted = state.sorted_local_ports();
+            if let Some(port) = sorted.get(state.local_selected) {
                 Action::OpenBrowser(port.port)
             } else {
                 Action::None
@@ -147,7 +150,9 @@ fn handle_port_input(state: &mut AppState, key: KeyEvent) -> Action {
                 let port_str = input.clone();
                 state.input_mode = InputMode::Normal;
                 if let Ok(port) = port_str.parse::<u16>() {
-                    return Action::StartForwardWithPort(state.selected, port);
+                    if let Some(orig_idx) = state.original_port_index(state.selected) {
+                        return Action::StartForwardWithPort(orig_idx, port);
+                    }
                 } else {
                     state.status_message = Some("Invalid port number".to_string());
                 }
@@ -635,5 +640,59 @@ mod tests {
         state.selected = 1; // port 3000
         let action = handle_key(&mut state, key(KeyCode::Char('o')));
         assert!(matches!(action, Action::OpenBrowser(3000)));
+    }
+
+    // ---- Sort + action correctness tests ----
+
+    #[test]
+    fn test_o_opens_browser_local_with_sort_active() {
+        let mut state = state_with_local_ports(); // ports: 3000, 5000, 8080
+        // Sort by port descending: visual order becomes 8080, 5000, 3000
+        state.sort.active = Some((1, SortOrder::Descending));
+        state.local_selected = 0; // visually 8080
+        let action = handle_key(&mut state, key(KeyCode::Char('o')));
+        assert!(matches!(action, Action::OpenBrowser(8080)));
+
+        state.local_selected = 2; // visually 3000
+        let action = handle_key(&mut state, key(KeyCode::Char('o')));
+        assert!(matches!(action, Action::OpenBrowser(3000)));
+    }
+
+    #[test]
+    fn test_o_opens_browser_remote_with_sort_active() {
+        let mut state = state_with_ports(); // ports: 8080, 3000, 5000
+        // Sort by port ascending: visual order becomes 3000, 5000, 8080
+        state.sort.active = Some((1, SortOrder::Ascending));
+        state.selected = 0; // visually 3000
+        let action = handle_key(&mut state, key(KeyCode::Char('o')));
+        assert!(matches!(action, Action::OpenBrowser(3000)));
+
+        state.selected = 2; // visually 8080
+        let action = handle_key(&mut state, key(KeyCode::Char('o')));
+        assert!(matches!(action, Action::OpenBrowser(8080)));
+    }
+
+    #[test]
+    fn test_enter_toggles_correct_port_with_sort_active() {
+        let mut state = state_with_ports(); // unsorted: 8080(idx0), 3000(idx1), 5000(idx2)
+        // Sort by port ascending: visual order 3000, 5000, 8080
+        state.sort.active = Some((1, SortOrder::Ascending));
+        state.selected = 0; // visually 3000 (original index 1)
+        let action = handle_key(&mut state, key(KeyCode::Enter));
+        assert!(matches!(action, Action::ToggleForward(1)));
+
+        state.selected = 2; // visually 8080 (original index 0)
+        let action = handle_key(&mut state, key(KeyCode::Enter));
+        assert!(matches!(action, Action::ToggleForward(0)));
+    }
+
+    #[test]
+    fn test_port_input_targets_correct_port_with_sort_active() {
+        let mut state = state_with_ports(); // unsorted: 8080(idx0), 3000(idx1), 5000(idx2)
+        state.sort.active = Some((1, SortOrder::Ascending));
+        state.selected = 2; // visually 8080 (original index 0)
+        state.input_mode = InputMode::PortInput("9090".to_string());
+        let action = handle_key(&mut state, key(KeyCode::Enter));
+        assert!(matches!(action, Action::StartForwardWithPort(0, 9090)));
     }
 }
