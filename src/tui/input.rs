@@ -18,6 +18,7 @@ pub fn handle_key(state: &mut AppState, key: KeyEvent) -> Action {
         InputMode::Normal => handle_normal_mode(state, key),
         InputMode::PortInput(_) => handle_port_input(state, key),
         InputMode::SortSelect => handle_sort_select(state, key),
+        InputMode::Search => handle_search(state, key),
     }
 }
 
@@ -76,6 +77,10 @@ fn handle_remote_mode(state: &mut AppState, key: KeyEvent) -> Action {
             state.input_mode = InputMode::SortSelect;
             Action::None
         }
+        KeyCode::Char('/') => {
+            state.enter_search();
+            Action::None
+        }
         _ => Action::None,
     }
 }
@@ -101,6 +106,10 @@ fn handle_local_mode(state: &mut AppState, key: KeyEvent) -> Action {
         KeyCode::Char('s') => {
             state.sort.column = 0;
             state.input_mode = InputMode::SortSelect;
+            Action::None
+        }
+        KeyCode::Char('/') => {
+            state.enter_search();
             Action::None
         }
         _ => Action::None,
@@ -169,6 +178,38 @@ fn handle_port_input(state: &mut AppState, key: KeyEvent) -> Action {
             if let InputMode::PortInput(ref mut input) = state.input_mode {
                 input.push(c);
             }
+            Action::None
+        }
+        _ => Action::None,
+    }
+}
+
+fn handle_search(state: &mut AppState, key: KeyEvent) -> Action {
+    match key.code {
+        KeyCode::Esc => {
+            state.exit_search_cancel();
+            Action::None
+        }
+        KeyCode::Enter => {
+            state.exit_search_confirm();
+            Action::None
+        }
+        KeyCode::Backspace => {
+            state.search_query.pop();
+            state.clamp_search_selected();
+            Action::None
+        }
+        KeyCode::Up | KeyCode::Char('k' | 'K') if state.search_selected > 0 => {
+            state.search_move_up();
+            Action::None
+        }
+        KeyCode::Down | KeyCode::Char('j' | 'J') => {
+            state.search_move_down();
+            Action::None
+        }
+        KeyCode::Char(c) => {
+            state.search_query.push(c);
+            state.clamp_search_selected();
             Action::None
         }
         _ => Action::None,
@@ -694,5 +735,97 @@ mod tests {
         state.input_mode = InputMode::PortInput("9090".to_string());
         let action = handle_key(&mut state, key(KeyCode::Enter));
         assert!(matches!(action, Action::StartForwardWithPort(0, 9090)));
+    }
+
+    // ---- Search mode tests ----
+
+    #[test]
+    fn test_slash_enters_search_remote() {
+        let mut state = state_with_ports();
+        handle_key(&mut state, key(KeyCode::Char('/')));
+        assert_eq!(state.input_mode, InputMode::Search);
+    }
+
+    #[test]
+    fn test_slash_enters_search_local() {
+        let mut state = state_with_local_ports();
+        handle_key(&mut state, key(KeyCode::Char('/')));
+        assert_eq!(state.input_mode, InputMode::Search);
+    }
+
+    #[test]
+    fn test_search_typing_appends() {
+        let mut state = state_with_ports();
+        state.enter_search();
+        handle_key(&mut state, key(KeyCode::Char('n')));
+        handle_key(&mut state, key(KeyCode::Char('g')));
+        assert_eq!(state.search_query, "ng");
+    }
+
+    #[test]
+    fn test_search_backspace() {
+        let mut state = state_with_ports();
+        state.enter_search();
+        state.search_query = "ngi".to_string();
+        handle_key(&mut state, key(KeyCode::Backspace));
+        assert_eq!(state.search_query, "ng");
+    }
+
+    #[test]
+    fn test_search_esc_cancels() {
+        let mut state = state_with_ports();
+        state.selected = 2;
+        state.enter_search();
+        state.search_query = "8080".to_string();
+        handle_key(&mut state, key(KeyCode::Esc));
+        assert_eq!(state.input_mode, InputMode::Normal);
+        assert_eq!(state.selected, 2); // restored
+        assert_eq!(state.search_query, "");
+    }
+
+    #[test]
+    fn test_search_enter_confirms() {
+        let mut state = state_with_ports(); // 8080, 3000, 5000
+        state.selected = 0;
+        state.enter_search();
+        state.search_query = "3000".to_string();
+        state.search_selected = 0;
+        handle_key(&mut state, key(KeyCode::Enter));
+        assert_eq!(state.input_mode, InputMode::Normal);
+        assert_eq!(state.selected, 1); // 3000 is at index 1
+    }
+
+    #[test]
+    fn test_search_navigate_up_down() {
+        let mut state = state_with_ports(); // 8080, 3000, 5000
+        state.enter_search();
+        // Empty query, all 3 visible
+        handle_key(&mut state, key(KeyCode::Down));
+        assert_eq!(state.search_selected, 1);
+        handle_key(&mut state, key(KeyCode::Up));
+        assert_eq!(state.search_selected, 0);
+    }
+
+    #[test]
+    fn test_search_navigate_j_k() {
+        let mut state = state_with_ports();
+        state.enter_search();
+        handle_key(&mut state, key(KeyCode::Char('j')));
+        assert_eq!(state.search_selected, 1);
+        handle_key(&mut state, key(KeyCode::Char('k')));
+        assert_eq!(state.search_selected, 0);
+    }
+
+    #[test]
+    fn test_search_clamps_on_type() {
+        let mut state = state_with_ports(); // 8080, 3000, 5000
+        state.enter_search();
+        state.search_selected = 2; // at last item
+        // Type a query that narrows to 1 result
+        handle_key(&mut state, key(KeyCode::Char('8')));
+        handle_key(&mut state, key(KeyCode::Char('0')));
+        handle_key(&mut state, key(KeyCode::Char('8')));
+        handle_key(&mut state, key(KeyCode::Char('0')));
+        assert_eq!(state.search_selected, 0); // clamped
     }
 }

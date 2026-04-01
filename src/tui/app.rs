@@ -28,6 +28,8 @@ pub enum InputMode {
     PortInput(String),
     /// User is selecting a column to sort by
     SortSelect,
+    /// User is typing a search query
+    Search,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -104,6 +106,10 @@ pub struct AppState {
     pub local_ports: Vec<DiscoveredPort>,
     pub local_selected: usize,
     pub sort: SortState,
+    pub search_query: String,
+    pub search_selected: usize,
+    pre_search_selected: usize,
+    pre_search_local_selected: usize,
 }
 
 impl AppState {
@@ -119,6 +125,10 @@ impl AppState {
             local_ports: Vec::new(),
             local_selected: 0,
             sort: SortState::new(),
+            search_query: String::new(),
+            search_selected: 0,
+            pre_search_selected: 0,
+            pre_search_local_selected: 0,
         }
     }
 
@@ -277,6 +287,126 @@ impl AppState {
         }
         entries
     }
+
+    /// Enter search mode, saving current cursor positions.
+    pub fn enter_search(&mut self) {
+        self.pre_search_selected = self.selected;
+        self.pre_search_local_selected = self.local_selected;
+        self.search_query.clear();
+        self.search_selected = 0;
+        self.input_mode = InputMode::Search;
+    }
+
+    /// Exit search on Enter: move cursor to the selected filtered entry, clear search.
+    pub fn exit_search_confirm(&mut self) {
+        match self.view_mode {
+            ViewMode::Remote => {
+                let filtered = self.filtered_ports();
+                if let Some(entry) = filtered.get(self.search_selected) {
+                    // Find this entry's index in the full sorted view
+                    let sorted = self.sorted_ports();
+                    if let Some(pos) = sorted.iter().position(|e| std::ptr::eq(*e, *entry)) {
+                        self.selected = pos;
+                    }
+                }
+            }
+            ViewMode::Local => {
+                let filtered = self.filtered_local_ports();
+                if let Some(entry) = filtered.get(self.search_selected) {
+                    let sorted = self.sorted_local_ports();
+                    if let Some(pos) = sorted.iter().position(|e| std::ptr::eq(*e, *entry)) {
+                        self.local_selected = pos;
+                    }
+                }
+            }
+        }
+        self.search_query.clear();
+        self.search_selected = 0;
+        self.input_mode = InputMode::Normal;
+    }
+
+    /// Exit search on Esc: restore original cursor, clear search.
+    pub fn exit_search_cancel(&mut self) {
+        self.selected = self.pre_search_selected;
+        self.local_selected = self.pre_search_local_selected;
+        self.search_query.clear();
+        self.search_selected = 0;
+        self.input_mode = InputMode::Normal;
+    }
+
+    /// Return remote ports filtered by the current search query.
+    pub fn filtered_ports(&self) -> Vec<&PortEntry> {
+        let sorted = self.sorted_ports();
+        if self.search_query.is_empty() {
+            return sorted;
+        }
+        sorted
+            .into_iter()
+            .filter(|e| matches_search(&self.search_query, &e.discovered))
+            .collect()
+    }
+
+    /// Return local ports filtered by the current search query.
+    pub fn filtered_local_ports(&self) -> Vec<&DiscoveredPort> {
+        let sorted = self.sorted_local_ports();
+        if self.search_query.is_empty() {
+            return sorted;
+        }
+        sorted
+            .into_iter()
+            .filter(|p| matches_search(&self.search_query, p))
+            .collect()
+    }
+
+    pub fn search_move_up(&mut self) {
+        if self.search_selected > 0 {
+            self.search_selected -= 1;
+        }
+    }
+
+    pub fn search_move_down(&mut self) {
+        let len = match self.view_mode {
+            ViewMode::Remote => self.filtered_ports().len(),
+            ViewMode::Local => self.filtered_local_ports().len(),
+        };
+        if self.search_selected + 1 < len {
+            self.search_selected += 1;
+        }
+    }
+
+    /// Clamp search_selected to filtered results length.
+    pub fn clamp_search_selected(&mut self) {
+        let len = match self.view_mode {
+            ViewMode::Remote => self.filtered_ports().len(),
+            ViewMode::Local => self.filtered_local_ports().len(),
+        };
+        if len == 0 {
+            self.search_selected = 0;
+        } else if self.search_selected >= len {
+            self.search_selected = len - 1;
+        }
+    }
+}
+
+fn matches_search(query: &str, port: &DiscoveredPort) -> bool {
+    let query = query.to_lowercase();
+    if port.port.to_string().contains(&query) {
+        return true;
+    }
+    if port.bind_address.to_lowercase().contains(&query) {
+        return true;
+    }
+    if let Some(ref name) = port.process_name {
+        if name.to_lowercase().contains(&query) {
+            return true;
+        }
+    }
+    if let Some(pid) = port.pid {
+        if pid.to_string().contains(&query) {
+            return true;
+        }
+    }
+    false
 }
 
 #[cfg(test)]
@@ -778,5 +908,233 @@ mod tests {
         let state = AppState::new("host".to_string());
         assert_eq!(state.sort.column, 0);
         assert_eq!(state.sort.active, None);
+    }
+
+    // ---- Search tests ----
+
+    #[test]
+    fn test_matches_search_by_port() {
+        let port = make_port(8080, "nginx");
+        assert!(matches_search("8080", &port));
+        assert!(matches_search("808", &port));
+        assert!(!matches_search("3000", &port));
+    }
+
+    #[test]
+    fn test_matches_search_by_process_name() {
+        let port = make_port(8080, "nginx");
+        assert!(matches_search("nginx", &port));
+        assert!(matches_search("NGINX", &port));
+        assert!(matches_search("ngi", &port));
+        assert!(!matches_search("apache", &port));
+    }
+
+    #[test]
+    fn test_matches_search_by_bind_address() {
+        let port = make_port(8080, "nginx");
+        assert!(matches_search("0.0.0.0", &port));
+        assert!(matches_search("0.0", &port));
+    }
+
+    #[test]
+    fn test_matches_search_by_pid() {
+        let port = DiscoveredPort {
+            port: 8080,
+            bind_address: "0.0.0.0".to_string(),
+            process_name: Some("nginx".to_string()),
+            pid: Some(12345),
+        };
+        assert!(matches_search("12345", &port));
+        assert!(matches_search("123", &port));
+    }
+
+    #[test]
+    fn test_matches_search_no_process_name() {
+        let port = DiscoveredPort {
+            port: 22,
+            bind_address: "0.0.0.0".to_string(),
+            process_name: None,
+            pid: None,
+        };
+        assert!(matches_search("22", &port));
+        assert!(!matches_search("nginx", &port));
+    }
+
+    #[test]
+    fn test_enter_search_saves_cursor() {
+        let mut state = AppState::new("host".to_string());
+        state.update_ports(vec![make_port(8080, "a"), make_port(3000, "b")]);
+        state.selected = 1;
+        state.enter_search();
+        assert_eq!(state.input_mode, InputMode::Search);
+        assert_eq!(state.search_query, "");
+        assert_eq!(state.search_selected, 0);
+        assert_eq!(state.pre_search_selected, 1);
+    }
+
+    #[test]
+    fn test_exit_search_cancel_restores_cursor() {
+        let mut state = AppState::new("host".to_string());
+        state.update_ports(vec![make_port(8080, "a"), make_port(3000, "b")]);
+        state.selected = 1;
+        state.enter_search();
+        state.search_query = "8080".to_string();
+        state.exit_search_cancel();
+        assert_eq!(state.input_mode, InputMode::Normal);
+        assert_eq!(state.selected, 1); // restored
+        assert_eq!(state.search_query, "");
+    }
+
+    #[test]
+    fn test_filtered_ports_empty_query_returns_all() {
+        let mut state = AppState::new("host".to_string());
+        state.update_ports(vec![make_port(8080, "a"), make_port(3000, "b")]);
+        state.search_query.clear();
+        assert_eq!(state.filtered_ports().len(), 2);
+    }
+
+    #[test]
+    fn test_filtered_ports_by_port_number() {
+        let mut state = AppState::new("host".to_string());
+        state.update_ports(vec![
+            make_port(8080, "nginx"),
+            make_port(3000, "node"),
+            make_port(5000, "python"),
+        ]);
+        state.search_query = "8080".to_string();
+        let filtered = state.filtered_ports();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].discovered.port, 8080);
+    }
+
+    #[test]
+    fn test_filtered_ports_by_process_name() {
+        let mut state = AppState::new("host".to_string());
+        state.update_ports(vec![
+            make_port(8080, "nginx"),
+            make_port(3000, "node"),
+            make_port(5000, "nginx-proxy"),
+        ]);
+        state.search_query = "nginx".to_string();
+        let filtered = state.filtered_ports();
+        assert_eq!(filtered.len(), 2);
+    }
+
+    #[test]
+    fn test_filtered_ports_case_insensitive() {
+        let mut state = AppState::new("host".to_string());
+        state.update_ports(vec![make_port(8080, "Nginx"), make_port(3000, "node")]);
+        state.search_query = "nginx".to_string();
+        let filtered = state.filtered_ports();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].discovered.port, 8080);
+    }
+
+    #[test]
+    fn test_filtered_ports_no_matches() {
+        let mut state = AppState::new("host".to_string());
+        state.update_ports(vec![make_port(8080, "nginx"), make_port(3000, "node")]);
+        state.search_query = "zzz".to_string();
+        assert!(state.filtered_ports().is_empty());
+    }
+
+    #[test]
+    fn test_filtered_local_ports() {
+        let mut state = AppState::new("host".to_string());
+        state.update_local_ports(vec![
+            make_port(8080, "nginx"),
+            make_port(3000, "node"),
+        ]);
+        state.search_query = "node".to_string();
+        let filtered = state.filtered_local_ports();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].port, 3000);
+    }
+
+    #[test]
+    fn test_exit_search_confirm_moves_cursor_remote() {
+        let mut state = AppState::new("host".to_string());
+        state.update_ports(vec![
+            make_port(8080, "nginx"),
+            make_port(3000, "node"),
+            make_port(5000, "python"),
+        ]);
+        state.selected = 0;
+        state.enter_search();
+        state.search_query = "node".to_string();
+        // Filtered list has one entry: 3000/node, which is index 1 in the full sorted list
+        state.search_selected = 0;
+        state.exit_search_confirm();
+        assert_eq!(state.input_mode, InputMode::Normal);
+        assert_eq!(state.selected, 1); // moved to node's position in full list
+    }
+
+    #[test]
+    fn test_exit_search_confirm_no_matches_keeps_cursor() {
+        let mut state = AppState::new("host".to_string());
+        state.update_ports(vec![make_port(8080, "nginx"), make_port(3000, "node")]);
+        state.selected = 0;
+        state.enter_search();
+        state.search_query = "zzz".to_string();
+        state.exit_search_confirm();
+        // No matches, selected unchanged from pre-search (confirm doesn't find entry)
+        assert_eq!(state.input_mode, InputMode::Normal);
+    }
+
+    #[test]
+    fn test_search_move_up_down() {
+        let mut state = AppState::new("host".to_string());
+        state.update_ports(vec![
+            make_port(8080, "nginx"),
+            make_port(3000, "node"),
+            make_port(5000, "python"),
+        ]);
+        state.enter_search();
+        // Empty query matches all 3
+        state.search_move_down();
+        assert_eq!(state.search_selected, 1);
+        state.search_move_down();
+        assert_eq!(state.search_selected, 2);
+        state.search_move_down();
+        assert_eq!(state.search_selected, 2); // clamped
+        state.search_move_up();
+        assert_eq!(state.search_selected, 1);
+        state.search_move_up();
+        assert_eq!(state.search_selected, 0);
+        state.search_move_up();
+        assert_eq!(state.search_selected, 0); // clamped
+    }
+
+    #[test]
+    fn test_clamp_search_selected() {
+        let mut state = AppState::new("host".to_string());
+        state.update_ports(vec![
+            make_port(8080, "nginx"),
+            make_port(3000, "node"),
+            make_port(5000, "python"),
+        ]);
+        state.enter_search();
+        state.search_selected = 2;
+        // Now filter to one result
+        state.search_query = "8080".to_string();
+        state.clamp_search_selected();
+        assert_eq!(state.search_selected, 0);
+    }
+
+    #[test]
+    fn test_exit_search_confirm_local() {
+        let mut state = AppState::new("host".to_string());
+        state.view_mode = ViewMode::Local;
+        state.update_local_ports(vec![
+            make_port(8080, "nginx"),
+            make_port(3000, "node"),
+            make_port(5000, "python"),
+        ]);
+        state.local_selected = 0;
+        state.enter_search();
+        state.search_query = "python".to_string();
+        state.search_selected = 0;
+        state.exit_search_confirm();
+        assert_eq!(state.local_selected, 2); // python is at index 2
     }
 }

@@ -80,8 +80,18 @@ fn render_remote_table(f: &mut Frame, state: &AppState, area: Rect) {
     .style(Style::default().add_modifier(Modifier::BOLD))
     .bottom_margin(1);
 
-    let sorted = state.sorted_ports();
-    let rows: Vec<Row> = sorted
+    let searching = state.input_mode == InputMode::Search;
+    let entries = if searching {
+        state.filtered_ports()
+    } else {
+        state.sorted_ports()
+    };
+    let highlight_idx = if searching {
+        state.search_selected
+    } else {
+        state.selected
+    };
+    let rows: Vec<Row> = entries
         .iter()
         .enumerate()
         .map(|(i, entry)| {
@@ -111,7 +121,7 @@ fn render_remote_table(f: &mut Frame, state: &AppState, area: Rect) {
                 .map(|p| p.to_string())
                 .unwrap_or_else(|| "-".to_string());
 
-            let style = if i == state.selected {
+            let style = if i == highlight_idx {
                 Style::default()
                     .bg(Color::DarkGray)
                     .add_modifier(Modifier::BOLD)
@@ -160,8 +170,18 @@ fn render_local_table(f: &mut Frame, state: &AppState, area: Rect) {
     .style(Style::default().add_modifier(Modifier::BOLD))
     .bottom_margin(1);
 
-    let sorted = state.sorted_local_ports();
-    let rows: Vec<Row> = sorted
+    let searching = state.input_mode == InputMode::Search;
+    let entries = if searching {
+        state.filtered_local_ports()
+    } else {
+        state.sorted_local_ports()
+    };
+    let highlight_idx = if searching {
+        state.search_selected
+    } else {
+        state.local_selected
+    };
+    let rows: Vec<Row> = entries
         .iter()
         .enumerate()
         .map(|(i, port)| {
@@ -171,7 +191,7 @@ fn render_local_table(f: &mut Frame, state: &AppState, area: Rect) {
                 .map(|p| p.to_string())
                 .unwrap_or_else(|| "-".to_string());
 
-            let style = if i == state.local_selected {
+            let style = if i == highlight_idx {
                 Style::default()
                     .bg(Color::DarkGray)
                     .add_modifier(Modifier::BOLD)
@@ -218,6 +238,8 @@ fn render_help_bar(f: &mut Frame, state: &AppState, area: Rect) {
                 Span::raw(" change port  "),
                 Span::styled("[s]", Style::default().add_modifier(Modifier::BOLD)),
                 Span::raw(" sort  "),
+                Span::styled("[/]", Style::default().add_modifier(Modifier::BOLD)),
+                Span::raw(" search  "),
                 Span::styled("[tab]", Style::default().add_modifier(Modifier::BOLD)),
                 Span::raw(" local  "),
                 Span::styled("[q]", Style::default().add_modifier(Modifier::BOLD)),
@@ -232,6 +254,8 @@ fn render_help_bar(f: &mut Frame, state: &AppState, area: Rect) {
                 Span::raw(" refresh  "),
                 Span::styled("[s]", Style::default().add_modifier(Modifier::BOLD)),
                 Span::raw(" sort  "),
+                Span::styled("[/]", Style::default().add_modifier(Modifier::BOLD)),
+                Span::raw(" search  "),
                 Span::styled("[q]", Style::default().add_modifier(Modifier::BOLD)),
                 Span::raw(" quit"),
             ]),
@@ -242,6 +266,22 @@ fn render_help_bar(f: &mut Frame, state: &AppState, area: Rect) {
             Span::styled("_", Style::default().add_modifier(Modifier::SLOW_BLINK)),
             Span::raw("  [enter] confirm  [esc] cancel"),
         ]),
+        InputMode::Search => {
+            let match_count = match state.view_mode {
+                ViewMode::Remote => state.filtered_ports().len(),
+                ViewMode::Local => state.filtered_local_ports().len(),
+            };
+            Line::from(vec![
+                Span::raw(" /"),
+                Span::styled(&state.search_query, Style::default().add_modifier(Modifier::BOLD)),
+                Span::styled("_", Style::default().add_modifier(Modifier::SLOW_BLINK)),
+                Span::styled(
+                    format!("  {} match{}", match_count, if match_count == 1 { "" } else { "es" }),
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::raw("  [enter] select  [esc] cancel"),
+            ])
+        }
         InputMode::SortSelect => {
             let col_names: Vec<&str> = match state.view_mode {
                 ViewMode::Remote => vec!["Status", "Port", "Local Addr", "Process", "PID"],
