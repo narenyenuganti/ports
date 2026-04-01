@@ -1,4 +1,5 @@
 use anyhow::Result;
+use std::collections::HashMap;
 use std::fmt;
 use tokio::process::Command;
 
@@ -199,18 +200,51 @@ pub fn parse_lsof_output(output: &str) -> Vec<DiscoveredPort> {
     ports
 }
 
+/// Deduplicate ports by port number for remote discovery.
+/// When the same port appears multiple times (e.g. IPv4 + IPv6),
+/// keeps the entry with the most information.
+fn dedup_by_port(ports: Vec<DiscoveredPort>) -> Vec<DiscoveredPort> {
+    let mut best: HashMap<u16, DiscoveredPort> = HashMap::new();
+    for p in ports {
+        if let Some(existing) = best.get(&p.port) {
+            if !should_replace(existing, &p) {
+                continue;
+            }
+        }
+        best.insert(p.port, p);
+    }
+    let mut result: Vec<_> = best.into_values().collect();
+    result.sort_by_key(|p| p.port);
+    result
+}
+
+fn should_replace(existing: &DiscoveredPort, candidate: &DiscoveredPort) -> bool {
+    if candidate.process_name.is_some() && existing.process_name.is_none() {
+        return true;
+    }
+    if candidate.process_name.is_none() && existing.process_name.is_some() {
+        return false;
+    }
+    is_wildcard(&candidate.bind_address) && !is_wildcard(&existing.bind_address)
+}
+
+fn is_wildcard(addr: &str) -> bool {
+    matches!(addr, "0.0.0.0" | "::" | "*")
+}
+
 /// Discover listening ports on the remote host via SSH.
 /// Tries `ss -tlnp` first, falls back to `netstat -tlnp`.
+/// Deduplicates entries that differ only by address family (IPv4/IPv6).
 pub async fn discover_remote_ports(session: &SshSession) -> Result<Vec<DiscoveredPort>> {
     // Try ss first
     let output = session.exec("ss -tlnp 2>/dev/null").await?;
     if !output.is_empty() && output.lines().count() > 1 {
-        return Ok(parse_ss_output(&output));
+        return Ok(dedup_by_port(parse_ss_output(&output)));
     }
 
     // Fall back to netstat
     let output = session.exec("netstat -tlnp 2>/dev/null").await?;
-    Ok(parse_netstat_output(&output))
+    Ok(dedup_by_port(parse_netstat_output(&output)))
 }
 
 /// Discover listening ports on the local machine.
@@ -661,5 +695,163 @@ node     1234  user   24u IPv4   0x1235 0t0      TCP  0.0.0.0:3000 (LISTEN)
             assert!(p.port > 0);
             assert!(!p.bind_address.is_empty());
         }
+    }
+
+    // ---- dedup_by_port tests ----
+
+    #[test]
+    fn test_dedup_ipv4_and_ipv6_same_port() {
+        let ports = vec![
+            DiscoveredPort {
+                port: 22,
+                bind_address: "0.0.0.0".to_string(),
+                process_name: None,
+                pid: None,
+            },
+            DiscoveredPort {
+                port: 22,
+                bind_address: "::".to_string(),
+                process_name: None,
+                pid: None,
+            },
+        ];
+        let result = dedup_by_port(ports);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].port, 22);
+    }
+
+    #[test]
+    fn test_dedup_prefers_entry_with_process_info() {
+        let ports = vec![
+            DiscoveredPort {
+                port: 53,
+                bind_address: "0.0.0.0".to_string(),
+                process_name: None,
+                pid: None,
+            },
+            DiscoveredPort {
+                port: 53,
+                bind_address: "::".to_string(),
+                process_name: Some("named".to_string()),
+                pid: Some(100),
+            },
+        ];
+        let result = dedup_by_port(ports);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].process_name.as_deref(), Some("named"));
+        assert_eq!(result[0].pid, Some(100));
+    }
+
+    #[test]
+    fn test_dedup_prefers_wildcard_address() {
+        let ports = vec![
+            DiscoveredPort {
+                port: 8080,
+                bind_address: "127.0.0.1".to_string(),
+                process_name: Some("nginx".to_string()),
+                pid: Some(1),
+            },
+            DiscoveredPort {
+                port: 8080,
+                bind_address: "0.0.0.0".to_string(),
+                process_name: Some("nginx".to_string()),
+                pid: Some(1),
+            },
+        ];
+        let result = dedup_by_port(ports);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].bind_address, "0.0.0.0");
+    }
+
+    #[test]
+    fn test_dedup_no_duplicates() {
+        let ports = vec![
+            DiscoveredPort {
+                port: 22,
+                bind_address: "0.0.0.0".to_string(),
+                process_name: Some("sshd".to_string()),
+                pid: Some(1),
+            },
+            DiscoveredPort {
+                port: 80,
+                bind_address: "0.0.0.0".to_string(),
+                process_name: Some("nginx".to_string()),
+                pid: Some(2),
+            },
+        ];
+        let result = dedup_by_port(ports);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].port, 22);
+        assert_eq!(result[1].port, 80);
+    }
+
+    #[test]
+    fn test_dedup_empty() {
+        let result = dedup_by_port(vec![]);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_dedup_multiple_ports_each_duplicated() {
+        let ports = vec![
+            DiscoveredPort {
+                port: 22,
+                bind_address: "0.0.0.0".to_string(),
+                process_name: None,
+                pid: None,
+            },
+            DiscoveredPort {
+                port: 22,
+                bind_address: "::".to_string(),
+                process_name: None,
+                pid: None,
+            },
+            DiscoveredPort {
+                port: 53,
+                bind_address: "0.0.0.0".to_string(),
+                process_name: None,
+                pid: None,
+            },
+            DiscoveredPort {
+                port: 53,
+                bind_address: "::".to_string(),
+                process_name: None,
+                pid: None,
+            },
+            DiscoveredPort {
+                port: 8080,
+                bind_address: "0.0.0.0".to_string(),
+                process_name: Some("nginx".to_string()),
+                pid: Some(100),
+            },
+        ];
+        let result = dedup_by_port(ports);
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0].port, 22);
+        assert_eq!(result[1].port, 53);
+        assert_eq!(result[2].port, 8080);
+    }
+
+    #[test]
+    fn test_dedup_keeps_process_info_over_wildcard() {
+        // localhost entry has process info, wildcard entry does not
+        // should keep the one with process info
+        let ports = vec![
+            DiscoveredPort {
+                port: 111,
+                bind_address: "0.0.0.0".to_string(),
+                process_name: None,
+                pid: None,
+            },
+            DiscoveredPort {
+                port: 111,
+                bind_address: "127.0.0.1".to_string(),
+                process_name: Some("rpcbind".to_string()),
+                pid: Some(500),
+            },
+        ];
+        let result = dedup_by_port(ports);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].process_name.as_deref(), Some("rpcbind"));
     }
 }
