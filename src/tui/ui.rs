@@ -229,7 +229,7 @@ fn render_help_bar(f: &mut Frame, state: &AppState, area: Rect) {
         InputMode::Normal => match state.view_mode {
             ViewMode::Remote => Line::from(vec![
                 Span::styled("[enter]", Style::default().add_modifier(Modifier::BOLD)),
-                Span::raw(" toggle  "),
+                Span::raw(" forward  "),
                 Span::styled("[o]", Style::default().add_modifier(Modifier::BOLD)),
                 Span::raw(" open  "),
                 Span::styled("[r]", Style::default().add_modifier(Modifier::BOLD)),
