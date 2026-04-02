@@ -227,9 +227,17 @@ fn render_local_table(f: &mut Frame, state: &AppState, area: Rect) {
 fn render_help_bar(f: &mut Frame, state: &AppState, area: Rect) {
     let help_text = match &state.input_mode {
         InputMode::Normal => match state.view_mode {
-            ViewMode::Remote => Line::from(vec![
+            ViewMode::Remote => {
+                let enter_label = {
+                    let sorted = state.sorted_ports();
+                    match sorted.get(state.selected) {
+                        Some(entry) if matches!(entry.forward_status, ForwardStatus::Active { .. }) => " stop  ",
+                        _ => " forward  ",
+                    }
+                };
+                Line::from(vec![
                 Span::styled("[enter]", Style::default().add_modifier(Modifier::BOLD)),
-                Span::raw(" forward  "),
+                Span::raw(enter_label),
                 Span::styled("[o]", Style::default().add_modifier(Modifier::BOLD)),
                 Span::raw(" open  "),
                 Span::styled("[p]", Style::default().add_modifier(Modifier::BOLD)),
@@ -244,7 +252,7 @@ fn render_help_bar(f: &mut Frame, state: &AppState, area: Rect) {
                 Span::raw(" local  "),
                 Span::styled("[q]", Style::default().add_modifier(Modifier::BOLD)),
                 Span::raw(" quit"),
-            ]),
+            ])},
             ViewMode::Local => Line::from(vec![
                 Span::styled("[o]", Style::default().add_modifier(Modifier::BOLD)),
                 Span::raw(" open  "),
