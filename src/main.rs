@@ -138,6 +138,24 @@ async fn run_loop(
                             }
                         }
                     }
+                    Action::ForwardAndOpen(idx) => {
+                        toggle_forward(state, fwd_manager, idx).await;
+                        if let Some(entry) = state.ports.get(idx) {
+                            if let ForwardStatus::Active { local_port } = &entry.forward_status {
+                                let url = format!("http://localhost:{}", local_port);
+                                match open::that(&url) {
+                                    Ok(_) => {
+                                        state.status_message =
+                                            Some(format!("Opened {}", url));
+                                    }
+                                    Err(e) => {
+                                        state.status_message =
+                                            Some(format!("Failed to open browser: {}", e));
+                                    }
+                                }
+                            }
+                        }
+                    }
                     Action::None => {}
                 }
             }

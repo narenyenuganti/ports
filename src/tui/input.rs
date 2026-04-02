@@ -11,6 +11,7 @@ pub enum Action {
     StartForwardWithPort(usize, u16),
     Refresh,
     OpenBrowser(u16),
+    ForwardAndOpen(usize),
 }
 
 pub fn handle_key(state: &mut AppState, key: KeyEvent) -> Action {
@@ -63,11 +64,16 @@ fn handle_remote_mode(state: &mut AppState, key: KeyEvent) -> Action {
         KeyCode::Char('o') => {
             let sorted = state.sorted_ports();
             if let Some(entry) = sorted.get(state.selected) {
-                let port = match &entry.forward_status {
-                    ForwardStatus::Active { local_port } => *local_port,
-                    _ => entry.discovered.port,
-                };
-                Action::OpenBrowser(port)
+                match &entry.forward_status {
+                    ForwardStatus::Active { local_port } => Action::OpenBrowser(*local_port),
+                    _ => {
+                        if let Some(orig_idx) = state.original_port_index(state.selected) {
+                            Action::ForwardAndOpen(orig_idx)
+                        } else {
+                            Action::None
+                        }
+                    }
+                }
             } else {
                 Action::None
             }
@@ -625,12 +631,12 @@ mod tests {
     // ---- Open browser tests ----
 
     #[test]
-    fn test_o_opens_browser_remote_idle() {
+    fn test_o_forwards_and_opens_remote_idle() {
         let mut state = state_with_ports();
         state.selected = 0;
         let action = handle_key(&mut state, key(KeyCode::Char('o')));
-        // Port 8080 is idle, so uses the remote port number
-        assert!(matches!(action, Action::OpenBrowser(8080)));
+        // Port 8080 is idle, so forward first then open
+        assert!(matches!(action, Action::ForwardAndOpen(0)));
     }
 
     #[test]
@@ -644,12 +650,12 @@ mod tests {
     }
 
     #[test]
-    fn test_o_opens_browser_remote_error_uses_remote_port() {
+    fn test_o_forwards_and_opens_remote_error() {
         let mut state = state_with_ports();
         state.set_forward_error(0, "conflict".to_string());
         state.selected = 0;
         let action = handle_key(&mut state, key(KeyCode::Char('o')));
-        assert!(matches!(action, Action::OpenBrowser(8080)));
+        assert!(matches!(action, Action::ForwardAndOpen(0)));
     }
 
     #[test]
@@ -676,11 +682,11 @@ mod tests {
     }
 
     #[test]
-    fn test_o_remote_selected_second_port() {
+    fn test_o_forwards_and_opens_remote_second_port() {
         let mut state = state_with_ports();
         state.selected = 1; // port 3000
         let action = handle_key(&mut state, key(KeyCode::Char('o')));
-        assert!(matches!(action, Action::OpenBrowser(3000)));
+        assert!(matches!(action, Action::ForwardAndOpen(1)));
     }
 
     // ---- Sort + action correctness tests ----
@@ -700,17 +706,17 @@ mod tests {
     }
 
     #[test]
-    fn test_o_opens_browser_remote_with_sort_active() {
+    fn test_o_forwards_and_opens_remote_with_sort_active() {
         let mut state = state_with_ports(); // ports: 8080, 3000, 5000
         // Sort by port ascending: visual order becomes 3000, 5000, 8080
         state.sort.active = Some((1, SortOrder::Ascending));
-        state.selected = 0; // visually 3000
+        state.selected = 0; // visually 3000 (original index 1)
         let action = handle_key(&mut state, key(KeyCode::Char('o')));
-        assert!(matches!(action, Action::OpenBrowser(3000)));
+        assert!(matches!(action, Action::ForwardAndOpen(1)));
 
-        state.selected = 2; // visually 8080
+        state.selected = 2; // visually 8080 (original index 0)
         let action = handle_key(&mut state, key(KeyCode::Char('o')));
-        assert!(matches!(action, Action::OpenBrowser(8080)));
+        assert!(matches!(action, Action::ForwardAndOpen(0)));
     }
 
     #[test]
