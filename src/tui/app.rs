@@ -30,6 +30,8 @@ pub enum InputMode {
     SortSelect,
     /// User is typing a search query
     Search,
+    /// Showing help overlay
+    Help,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

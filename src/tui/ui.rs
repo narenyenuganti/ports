@@ -2,7 +2,7 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Cell, Paragraph, Row, Table},
+    widgets::{Block, Borders, Cell, Clear, Paragraph, Row, Table},
     Frame,
 };
 
@@ -19,6 +19,10 @@ pub fn render(f: &mut Frame, state: &AppState) {
     render_status_bar(f, state, chunks[0]);
     render_port_table(f, state, chunks[1]);
     render_help_bar(f, state, chunks[2]);
+
+    if state.input_mode == InputMode::Help {
+        render_help_overlay(f, state);
+    }
 }
 
 fn render_status_bar(f: &mut Frame, state: &AppState, area: Rect) {
@@ -250,6 +254,8 @@ fn render_help_bar(f: &mut Frame, state: &AppState, area: Rect) {
                 Span::raw(" refresh  "),
                 Span::styled("[tab]", Style::default().add_modifier(Modifier::BOLD)),
                 Span::raw(" local  "),
+                Span::styled("[h]", Style::default().add_modifier(Modifier::BOLD)),
+                Span::raw(" help  "),
                 Span::styled("[q]", Style::default().add_modifier(Modifier::BOLD)),
                 Span::raw(" quit"),
             ])},
@@ -264,6 +270,8 @@ fn render_help_bar(f: &mut Frame, state: &AppState, area: Rect) {
                 Span::raw(" refresh  "),
                 Span::styled("[tab]", Style::default().add_modifier(Modifier::BOLD)),
                 Span::raw(" remote  "),
+                Span::styled("[h]", Style::default().add_modifier(Modifier::BOLD)),
+                Span::raw(" help  "),
                 Span::styled("[q]", Style::default().add_modifier(Modifier::BOLD)),
                 Span::raw(" quit"),
             ]),
@@ -320,10 +328,105 @@ fn render_help_bar(f: &mut Frame, state: &AppState, area: Rect) {
             spans.push(Span::raw(" cancel"));
             Line::from(spans)
         }
+        InputMode::Help => Line::from(Span::raw(" Press any key to close help")),
     };
 
     f.render_widget(
         Paragraph::new(help_text).block(Block::default().borders(Borders::TOP)),
         area,
+    );
+}
+
+fn render_help_overlay(f: &mut Frame, state: &AppState) {
+    let lines: Vec<Line> = match state.view_mode {
+        ViewMode::Remote => vec![
+            Line::from(vec![
+                Span::styled("  enter  ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::raw("Forward or stop the selected port"),
+            ]),
+            Line::from(vec![
+                Span::styled("  o      ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::raw("Open port in browser (auto-forwards if needed)"),
+            ]),
+            Line::from(vec![
+                Span::styled("  p      ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::raw("Forward with a custom local port number"),
+            ]),
+            Line::from(vec![
+                Span::styled("  /      ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::raw("Search and filter ports by any column"),
+            ]),
+            Line::from(vec![
+                Span::styled("  s      ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::raw("Sort ports by a column"),
+            ]),
+            Line::from(vec![
+                Span::styled("  r      ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::raw("Refresh the port list"),
+            ]),
+            Line::from(vec![
+                Span::styled("  tab    ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::raw("Switch to local ports view"),
+            ]),
+            Line::from(vec![
+                Span::styled("  h      ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::raw("Show this help"),
+            ]),
+            Line::from(vec![
+                Span::styled("  q      ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::raw("Quit"),
+            ]),
+        ],
+        ViewMode::Local => vec![
+            Line::from(vec![
+                Span::styled("  o      ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::raw("Open port in browser"),
+            ]),
+            Line::from(vec![
+                Span::styled("  /      ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::raw("Search and filter ports by any column"),
+            ]),
+            Line::from(vec![
+                Span::styled("  s      ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::raw("Sort ports by a column"),
+            ]),
+            Line::from(vec![
+                Span::styled("  r      ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::raw("Refresh the port list"),
+            ]),
+            Line::from(vec![
+                Span::styled("  tab    ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::raw("Switch to remote ports view"),
+            ]),
+            Line::from(vec![
+                Span::styled("  h      ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::raw("Show this help"),
+            ]),
+            Line::from(vec![
+                Span::styled("  q      ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::raw("Quit"),
+            ]),
+        ],
+    };
+
+    let height = lines.len() as u16 + 2; // +2 for border
+    let width = 54;
+    let area = f.area();
+    let popup = Rect {
+        x: area.width.saturating_sub(width) / 2,
+        y: area.height.saturating_sub(height) / 2,
+        width: width.min(area.width),
+        height: height.min(area.height),
+    };
+
+    f.render_widget(Clear, popup);
+    f.render_widget(
+        Paragraph::new(lines).block(
+            Block::default()
+                .title(" Help — press any key to close ")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Yellow)),
+        ),
+        popup,
     );
 }

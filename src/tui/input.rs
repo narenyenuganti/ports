@@ -20,6 +20,10 @@ pub fn handle_key(state: &mut AppState, key: KeyEvent) -> Action {
         InputMode::PortInput(_) => handle_port_input(state, key),
         InputMode::SortSelect => handle_sort_select(state, key),
         InputMode::Search => handle_search(state, key),
+        InputMode::Help => {
+            state.input_mode = InputMode::Normal;
+            Action::None
+        }
     }
 }
 
@@ -31,6 +35,10 @@ fn handle_normal_mode(state: &mut AppState, key: KeyEvent) -> Action {
             Action::None
         }
         KeyCode::Char('r') => Action::Refresh,
+        KeyCode::Char('h') => {
+            state.input_mode = InputMode::Help;
+            Action::None
+        }
         _ => match state.view_mode {
             ViewMode::Remote => handle_remote_mode(state, key),
             ViewMode::Local => handle_local_mode(state, key),
