@@ -2,13 +2,13 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Cell, Clear, Paragraph, Row, Table},
+    widgets::{Block, Borders, Cell, Clear, Paragraph, Row, Table, TableState},
     Frame,
 };
 
 use super::app::{AppState, ConnectionState, ForwardStatus, InputMode, SortOrder, SortState, ViewMode};
 
-pub fn render(f: &mut Frame, state: &AppState) {
+pub fn render(f: &mut Frame, state: &mut AppState) {
     let chunks = Layout::vertical([
         Constraint::Length(1),  // status bar
         Constraint::Min(5),    // port table
@@ -55,7 +55,7 @@ fn render_status_bar(f: &mut Frame, state: &AppState, area: Rect) {
     f.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
-fn render_port_table(f: &mut Frame, state: &AppState, area: Rect) {
+fn render_port_table(f: &mut Frame, state: &mut AppState, area: Rect) {
     match state.view_mode {
         ViewMode::Remote => render_remote_table(f, state, area),
         ViewMode::Local => render_local_table(f, state, area),
@@ -70,7 +70,7 @@ fn sort_indicator(sort: &SortState, col: usize) -> &'static str {
     }
 }
 
-fn render_remote_table(f: &mut Frame, state: &AppState, area: Rect) {
+fn render_remote_table(f: &mut Frame, state: &mut AppState, area: Rect) {
     let col_names = ["Status", "Port", "Local Address", "Process", "PID"];
     let header = Row::new(
         col_names
@@ -97,8 +97,7 @@ fn render_remote_table(f: &mut Frame, state: &AppState, area: Rect) {
     };
     let rows: Vec<Row> = entries
         .iter()
-        .enumerate()
-        .map(|(i, entry)| {
+        .map(|entry| {
             let (status_icon, local_addr) = match &entry.forward_status {
                 ForwardStatus::Active { local_port } => (
                     Span::styled("●", Style::default().fg(Color::Green)),
@@ -125,14 +124,6 @@ fn render_remote_table(f: &mut Frame, state: &AppState, area: Rect) {
                 .map(|p| p.to_string())
                 .unwrap_or_else(|| "-".to_string());
 
-            let style = if i == highlight_idx {
-                Style::default()
-                    .bg(Color::DarkGray)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default()
-            };
-
             Row::new(vec![
                 Cell::from(status_icon),
                 Cell::from(entry.discovered.port.to_string()),
@@ -140,7 +131,6 @@ fn render_remote_table(f: &mut Frame, state: &AppState, area: Rect) {
                 Cell::from(process.to_string()),
                 Cell::from(pid),
             ])
-            .style(style)
         })
         .collect();
 
@@ -155,12 +145,21 @@ fn render_remote_table(f: &mut Frame, state: &AppState, area: Rect) {
         ],
     )
     .header(header)
+    .row_highlight_style(
+        Style::default()
+            .bg(Color::DarkGray)
+            .add_modifier(Modifier::BOLD),
+    )
     .block(Block::default().borders(Borders::ALL).title(" Remote Ports "));
 
-    f.render_widget(table, area);
+    let mut table_state = TableState::new()
+        .with_offset(state.remote_scroll_offset)
+        .with_selected(Some(highlight_idx));
+    f.render_stateful_widget(table, area, &mut table_state);
+    state.remote_scroll_offset = table_state.offset();
 }
 
-fn render_local_table(f: &mut Frame, state: &AppState, area: Rect) {
+fn render_local_table(f: &mut Frame, state: &mut AppState, area: Rect) {
     let col_names = ["Bind Address", "Port", "Process", "PID"];
     let header = Row::new(
         col_names
@@ -187,21 +186,12 @@ fn render_local_table(f: &mut Frame, state: &AppState, area: Rect) {
     };
     let rows: Vec<Row> = entries
         .iter()
-        .enumerate()
-        .map(|(i, port)| {
+        .map(|port| {
             let process = port.process_name.as_deref().unwrap_or("-");
             let pid = port
                 .pid
                 .map(|p| p.to_string())
                 .unwrap_or_else(|| "-".to_string());
-
-            let style = if i == highlight_idx {
-                Style::default()
-                    .bg(Color::DarkGray)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default()
-            };
 
             Row::new(vec![
                 Cell::from(port.bind_address.clone()),
@@ -209,7 +199,6 @@ fn render_local_table(f: &mut Frame, state: &AppState, area: Rect) {
                 Cell::from(process.to_string()),
                 Cell::from(pid),
             ])
-            .style(style)
         })
         .collect();
 
@@ -223,9 +212,18 @@ fn render_local_table(f: &mut Frame, state: &AppState, area: Rect) {
         ],
     )
     .header(header)
+    .row_highlight_style(
+        Style::default()
+            .bg(Color::DarkGray)
+            .add_modifier(Modifier::BOLD),
+    )
     .block(Block::default().borders(Borders::ALL).title(" Local Ports "));
 
-    f.render_widget(table, area);
+    let mut table_state = TableState::new()
+        .with_offset(state.local_scroll_offset)
+        .with_selected(Some(highlight_idx));
+    f.render_stateful_widget(table, area, &mut table_state);
+    state.local_scroll_offset = table_state.offset();
 }
 
 fn render_help_bar(f: &mut Frame, state: &AppState, area: Rect) {
@@ -429,4 +427,66 @@ fn render_help_overlay(f: &mut Frame, state: &AppState) {
         ),
         popup,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ssh::discovery::DiscoveredPort;
+    use ratatui::{backend::TestBackend, Terminal};
+
+    fn make_port(port: u16) -> DiscoveredPort {
+        DiscoveredPort {
+            port,
+            bind_address: "0.0.0.0".to_string(),
+            process_name: Some(format!("proc-{port}")),
+            pid: Some(u32::from(port)),
+        }
+    }
+
+    fn render_lines(state: &mut AppState, width: u16, height: u16) -> Vec<String> {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| render(f, state)).unwrap();
+
+        let buffer = terminal.backend_mut().buffer().clone();
+        let row_width = buffer.area.width as usize;
+
+        buffer
+            .content
+            .chunks(row_width)
+            .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
+            .collect()
+    }
+
+    #[test]
+    fn test_remote_table_scrolls_selected_row_into_view() {
+        let mut state = AppState::new("host".to_string());
+        let mut ports: Vec<DiscoveredPort> = (4100..4120).map(make_port).collect();
+        ports.push(make_port(56387));
+        state.update_ports(ports);
+        state.selected = state.ports.len() - 1;
+
+        let lines = render_lines(&mut state, 80, 10);
+        let screen = lines.join("\n");
+
+        assert!(screen.contains("56387"), "screen did not show selected port:\n{screen}");
+        assert!(!screen.contains("4100"), "screen did not scroll away from top rows:\n{screen}");
+    }
+
+    #[test]
+    fn test_local_table_scrolls_selected_row_into_view() {
+        let mut state = AppState::new("host".to_string());
+        state.view_mode = ViewMode::Local;
+        let mut ports: Vec<DiscoveredPort> = (5100..5120).map(make_port).collect();
+        ports.push(make_port(56387));
+        state.update_local_ports(ports);
+        state.local_selected = state.local_ports.len() - 1;
+
+        let lines = render_lines(&mut state, 80, 10);
+        let screen = lines.join("\n");
+
+        assert!(screen.contains("56387"), "screen did not show selected port:\n{screen}");
+        assert!(!screen.contains("5100"), "screen did not scroll away from top rows:\n{screen}");
+    }
 }
