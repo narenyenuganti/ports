@@ -64,6 +64,12 @@ impl ForwardManager {
         }
     }
 
+    /// Replace the SSH session (e.g. after reconnect).
+    /// Existing forwards keep using the old session until they fail.
+    pub fn update_session(&mut self, session: Arc<SshSession>) {
+        self.session = session;
+    }
+
     /// Start forwarding: bind locally and proxy to remote via SSH.
     /// Returns the actual local port bound.
     pub async fn start_forward(

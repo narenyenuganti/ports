@@ -362,7 +362,7 @@ fn render_help_overlay(f: &mut Frame, state: &AppState) {
             ]),
             Line::from(vec![
                 Span::styled("  r      ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-                Span::raw("Refresh the port list"),
+                Span::raw("Refresh ports, reconnect SSH if needed"),
             ]),
             Line::from(vec![
                 Span::styled("  tab    ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),

@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use forward::tunnel::ForwardManager;
-use ssh::config::load_host_config;
+use ssh::config::{load_host_config, HostConfig};
 use ssh::connection::SshSession;
 use ssh::discovery::{discover_local_ports, discover_remote_ports};
 use tui::app::{AppState, ForwardStatus, ViewMode};
@@ -68,7 +68,7 @@ async fn main() -> Result<()> {
     let mut terminal = Terminal::new(backend)?;
 
     // Main event loop
-    let result = run_loop(&mut terminal, &mut state, &mut fwd_manager, &session).await;
+    let result = run_loop(&mut terminal, &mut state, &mut fwd_manager, session, &host_config).await;
 
     // Cleanup
     fwd_manager.stop_all();
@@ -82,7 +82,8 @@ async fn run_loop(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     state: &mut AppState,
     fwd_manager: &mut ForwardManager,
-    session: &Arc<SshSession>,
+    mut session: Arc<SshSession>,
+    host_config: &HostConfig,
 ) -> Result<()> {
     loop {
         terminal.draw(|f| render(f, state))?;
@@ -107,14 +108,39 @@ async fn run_loop(
                         terminal.draw(|f| render(f, state))?;
                         match state.view_mode {
                             ViewMode::Remote => {
-                                match discover_remote_ports(session).await {
+                                match discover_remote_ports(&session).await {
                                     Ok(ports) => {
                                         state.update_ports(ports);
                                         state.status_message = None;
                                     }
-                                    Err(e) => {
-                                        state.status_message =
-                                            Some(format!("Scan failed: {}", e));
+                                    Err(_) => {
+                                        // Discovery failed — try reconnecting
+                                        state.status_message = Some("Reconnecting...".to_string());
+                                        terminal.draw(|f| render(f, state))?;
+                                        match SshSession::connect(host_config).await {
+                                            Ok(new_session) => {
+                                                session = Arc::new(new_session);
+                                                fwd_manager.stop_all();
+                                                for i in 0..state.ports.len() {
+                                                    state.set_forward_idle(i);
+                                                }
+                                                fwd_manager.update_session(session.clone());
+                                                match discover_remote_ports(&session).await {
+                                                    Ok(ports) => {
+                                                        state.update_ports(ports);
+                                                        state.status_message = Some("Reconnected".to_string());
+                                                    }
+                                                    Err(e) => {
+                                                        state.status_message =
+                                                            Some(format!("Scan failed after reconnect: {}", e));
+                                                    }
+                                                }
+                                            }
+                                            Err(e) => {
+                                                state.status_message =
+                                                    Some(format!("Reconnect failed: {}", e));
+                                            }
+                                        }
                                     }
                                 }
                             }
