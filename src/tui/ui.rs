@@ -52,6 +52,13 @@ fn render_status_bar(f: &mut Frame, state: &AppState, area: Rect) {
         ));
     }
 
+    if let Some(ref ft_status) = state.file_transfer_status {
+        spans.push(Span::styled(
+            format!("  {}", ft_status),
+            Style::default().fg(Color::Cyan),
+        ));
+    }
+
     f.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
@@ -244,6 +251,8 @@ fn render_help_bar(f: &mut Frame, state: &AppState, area: Rect) {
                 Span::raw(" open  "),
                 Span::styled("[p]", Style::default().add_modifier(Modifier::BOLD)),
                 Span::raw(" change port  "),
+                Span::styled("[f]", Style::default().add_modifier(Modifier::BOLD)),
+                Span::raw(" send file  "),
                 Span::styled("[/]", Style::default().add_modifier(Modifier::BOLD)),
                 Span::raw(" search  "),
                 Span::styled("[s]", Style::default().add_modifier(Modifier::BOLD)),
@@ -328,14 +337,14 @@ fn render_help_bar(f: &mut Frame, state: &AppState, area: Rect) {
         }
         InputMode::Help => Line::from(Span::raw(" Press any key to close help")),
         InputMode::FilePathInput(input) => Line::from(vec![
-            Span::raw(" Send file – Local path: "),
-            Span::styled(input.as_str(), Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" Local file path: "),
+            Span::styled(input, Style::default().add_modifier(Modifier::BOLD)),
             Span::styled("_", Style::default().add_modifier(Modifier::SLOW_BLINK)),
             Span::raw("  [enter] confirm  [esc] cancel"),
         ]),
         InputMode::RemotePathInput { remote, .. } => Line::from(vec![
-            Span::raw(" Send file – Remote path: "),
-            Span::styled(remote.as_str(), Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" Remote path: "),
+            Span::styled(remote, Style::default().add_modifier(Modifier::BOLD)),
             Span::styled("_", Style::default().add_modifier(Modifier::SLOW_BLINK)),
             Span::raw("  [enter] send  [esc] cancel"),
         ]),
@@ -361,6 +370,10 @@ fn render_help_overlay(f: &mut Frame, state: &AppState) {
             Line::from(vec![
                 Span::styled("  p      ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
                 Span::raw("Forward with a custom local port number"),
+            ]),
+            Line::from(vec![
+                Span::styled("  f      ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::raw("Send a local file to the remote machine"),
             ]),
             Line::from(vec![
                 Span::styled("  /      ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
