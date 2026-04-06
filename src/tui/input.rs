@@ -219,7 +219,11 @@ fn handle_file_path_input(state: &mut AppState, key: KeyEvent) -> Action {
                     state.status_message = Some("No file path provided".to_string());
                     return Action::None;
                 }
-                let remote_path = format!("/tmp{}", local_path);
+                let remote_path = if local_path.starts_with('/') {
+                    format!("/tmp{}", local_path)
+                } else {
+                    format!("/tmp/{}", local_path)
+                };
                 state.input_mode = InputMode::RemotePathInput {
                     local: local_path,
                     remote: remote_path,
@@ -885,6 +889,20 @@ mod tests {
             InputMode::RemotePathInput {
                 local: "/home/user/file.txt".to_string(),
                 remote: "/tmp/home/user/file.txt".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn test_file_path_input_enter_relative_path_gets_slash() {
+        let mut state = state_with_ports();
+        state.input_mode = InputMode::FilePathInput("file.txt".to_string());
+        handle_key(&mut state, key(KeyCode::Enter));
+        assert_eq!(
+            state.input_mode,
+            InputMode::RemotePathInput {
+                local: "file.txt".to_string(),
+                remote: "/tmp/file.txt".to_string(),
             }
         );
     }

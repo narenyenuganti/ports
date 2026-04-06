@@ -53,11 +53,8 @@ pub async fn send_file(
     // Wait for exit status
     let mut exit_status = None;
     while let Some(msg) = channel.wait().await {
-        match msg {
-            ChannelMsg::ExitStatus { exit_status: code } => {
-                exit_status = Some(code);
-            }
-            _ => {}
+        if let ChannelMsg::ExitStatus { exit_status: code } = msg {
+            exit_status = Some(code);
         }
     }
 

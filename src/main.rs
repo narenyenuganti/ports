@@ -114,7 +114,11 @@ async fn run_send_file(host: &str, local_path: &str, remote_path: Option<&str>) 
 
     let remote_path = match remote_path {
         Some(p) => p.to_string(),
-        None => format!("/tmp{}", local_path),
+        None => if local_path.starts_with('/') {
+            format!("/tmp{}", local_path)
+        } else {
+            format!("/tmp/{}", local_path)
+        },
     };
 
     let host_config = load_host_config(host)
