@@ -27,57 +27,116 @@ use tui::ui::render;
 #[derive(Parser)]
 #[command(name = "ports", about = "Lightweight SSH port forwarding TUI")]
 struct Cli {
-    /// SSH config host alias to connect to
-    host: String,
+    #[command(subcommand)]
+    command: Option<Commands>,
+
+    /// SSH config host alias (for TUI mode)
+    host: Option<String>,
+}
+
+#[derive(clap::Subcommand)]
+enum Commands {
+    /// Send a local file to a remote machine
+    SendFile {
+        /// SSH config host alias
+        host: String,
+        /// Local file path
+        local_path: String,
+        /// Remote destination path (defaults to /tmp/<local_path>)
+        remote_path: Option<String>,
+    },
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    // Parse SSH config
-    let host_config = load_host_config(&cli.host)
-        .with_context(|| format!("Failed to load SSH config for host '{}'", cli.host))?;
+    match cli.command {
+        Some(Commands::SendFile {
+            host,
+            local_path,
+            remote_path,
+        }) => {
+            run_send_file(&host, &local_path, remote_path.as_deref()).await
+        }
+        None => {
+            let host = cli
+                .host
+                .context("Host argument required for TUI mode")?;
+            run_tui(&host).await
+        }
+    }
+}
+
+async fn run_tui(host: &str) -> Result<()> {
+    let host_config = load_host_config(host)
+        .with_context(|| format!("Failed to load SSH config for host '{}'", host))?;
 
     eprintln!(
         "Connecting to {}@{}:{}...",
         host_config.user, host_config.hostname, host_config.port
     );
 
-    // Connect
     let session = SshSession::connect(&host_config).await?;
     let session = Arc::new(session);
 
-    // Discover ports (remote and local concurrently)
     let (remote_result, local_ports) = tokio::join!(
         discover_remote_ports(&session),
         discover_local_ports()
     );
     let discovered = remote_result?;
 
-    // Initialize app state
-    let mut state = AppState::new(cli.host.clone());
+    let mut state = AppState::new(host.to_string());
     state.update_ports(discovered);
     state.update_local_ports(local_ports);
 
-    // Initialize forward manager
     let mut fwd_manager = ForwardManager::new(session.clone());
 
-    // Set up terminal
     enable_raw_mode()?;
     stdout().execute(EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout());
     let mut terminal = Terminal::new(backend)?;
 
-    // Main event loop
     let result = run_loop(&mut terminal, &mut state, &mut fwd_manager, session, &host_config).await;
 
-    // Cleanup
     fwd_manager.stop_all();
     disable_raw_mode()?;
     stdout().execute(LeaveAlternateScreen)?;
 
     result
+}
+
+async fn run_send_file(host: &str, local_path: &str, remote_path: Option<&str>) -> Result<()> {
+    // Validate local file
+    if !Path::new(local_path).exists() {
+        anyhow::bail!("File not found: {}", local_path);
+    }
+
+    let remote_path = match remote_path {
+        Some(p) => p.to_string(),
+        None => format!("/tmp{}", local_path),
+    };
+
+    let host_config = load_host_config(host)
+        .with_context(|| format!("Failed to load SSH config for host '{}'", host))?;
+
+    eprintln!(
+        "Connecting to {}@{}:{}...",
+        host_config.user, host_config.hostname, host_config.port
+    );
+
+    let session = SshSession::connect(&host_config).await?;
+
+    let filename = Path::new(local_path)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| local_path.to_string());
+
+    eprintln!("Sending {}...", filename);
+    send_file(&session, local_path, &remote_path).await?;
+    eprintln!("Sent {} -> {}", filename, remote_path);
+
+    Ok(())
 }
 
 async fn run_loop(
