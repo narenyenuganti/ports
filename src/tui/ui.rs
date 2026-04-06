@@ -327,6 +327,18 @@ fn render_help_bar(f: &mut Frame, state: &AppState, area: Rect) {
             Line::from(spans)
         }
         InputMode::Help => Line::from(Span::raw(" Press any key to close help")),
+        InputMode::FilePathInput(input) => Line::from(vec![
+            Span::raw(" Send file – Local path: "),
+            Span::styled(input.as_str(), Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled("_", Style::default().add_modifier(Modifier::SLOW_BLINK)),
+            Span::raw("  [enter] confirm  [esc] cancel"),
+        ]),
+        InputMode::RemotePathInput { remote, .. } => Line::from(vec![
+            Span::raw(" Send file – Remote path: "),
+            Span::styled(remote.as_str(), Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled("_", Style::default().add_modifier(Modifier::SLOW_BLINK)),
+            Span::raw("  [enter] send  [esc] cancel"),
+        ]),
     };
 
     f.render_widget(

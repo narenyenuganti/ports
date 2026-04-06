@@ -182,6 +182,9 @@ async fn run_loop(
                             }
                         }
                     }
+                    Action::SendFile { .. } => {
+                        // Implemented in Task 5
+                    }
                     Action::None => {}
                 }
             }

@@ -12,6 +12,7 @@ pub enum Action {
     Refresh,
     OpenBrowser(u16),
     ForwardAndOpen(usize),
+    SendFile { local: String, remote: String },
 }
 
 pub fn handle_key(state: &mut AppState, key: KeyEvent) -> Action {
@@ -24,6 +25,8 @@ pub fn handle_key(state: &mut AppState, key: KeyEvent) -> Action {
             state.input_mode = InputMode::Normal;
             Action::None
         }
+        InputMode::FilePathInput(_) => handle_file_path_input(state, key),
+        InputMode::RemotePathInput { .. } => handle_remote_path_input(state, key),
     }
 }
 
@@ -93,6 +96,10 @@ fn handle_remote_mode(state: &mut AppState, key: KeyEvent) -> Action {
         }
         KeyCode::Char('/') => {
             state.enter_search();
+            Action::None
+        }
+        KeyCode::Char('f') => {
+            state.input_mode = InputMode::FilePathInput(String::new());
             Action::None
         }
         _ => Action::None,
@@ -191,6 +198,79 @@ fn handle_port_input(state: &mut AppState, key: KeyEvent) -> Action {
         KeyCode::Char(c) if c.is_ascii_digit() => {
             if let InputMode::PortInput(ref mut input) = state.input_mode {
                 input.push(c);
+            }
+            Action::None
+        }
+        _ => Action::None,
+    }
+}
+
+fn handle_file_path_input(state: &mut AppState, key: KeyEvent) -> Action {
+    match key.code {
+        KeyCode::Esc => {
+            state.input_mode = InputMode::Normal;
+            Action::None
+        }
+        KeyCode::Enter => {
+            if let InputMode::FilePathInput(ref input) = state.input_mode {
+                let local_path = input.clone();
+                if local_path.is_empty() {
+                    state.input_mode = InputMode::Normal;
+                    state.status_message = Some("No file path provided".to_string());
+                    return Action::None;
+                }
+                let remote_path = format!("/tmp{}", local_path);
+                state.input_mode = InputMode::RemotePathInput {
+                    local: local_path,
+                    remote: remote_path,
+                };
+            }
+            Action::None
+        }
+        KeyCode::Backspace => {
+            if let InputMode::FilePathInput(ref mut input) = state.input_mode {
+                input.pop();
+            }
+            Action::None
+        }
+        KeyCode::Char(c) => {
+            if let InputMode::FilePathInput(ref mut input) = state.input_mode {
+                input.push(c);
+            }
+            Action::None
+        }
+        _ => Action::None,
+    }
+}
+
+fn handle_remote_path_input(state: &mut AppState, key: KeyEvent) -> Action {
+    match key.code {
+        KeyCode::Esc => {
+            state.input_mode = InputMode::Normal;
+            Action::None
+        }
+        KeyCode::Enter => {
+            if let InputMode::RemotePathInput { ref local, ref remote } = state.input_mode {
+                let local = local.clone();
+                let remote = remote.clone();
+                state.input_mode = InputMode::Normal;
+                if remote.is_empty() {
+                    state.status_message = Some("No remote path provided".to_string());
+                    return Action::None;
+                }
+                return Action::SendFile { local, remote };
+            }
+            Action::None
+        }
+        KeyCode::Backspace => {
+            if let InputMode::RemotePathInput { ref mut remote, .. } = state.input_mode {
+                remote.pop();
+            }
+            Action::None
+        }
+        KeyCode::Char(c) => {
+            if let InputMode::RemotePathInput { ref mut remote, .. } = state.input_mode {
+                remote.push(c);
             }
             Action::None
         }
@@ -749,6 +829,149 @@ mod tests {
         state.input_mode = InputMode::PortInput("9090".to_string());
         let action = handle_key(&mut state, key(KeyCode::Enter));
         assert!(matches!(action, Action::StartForwardWithPort(0, 9090)));
+    }
+
+    // ---- File send mode tests ----
+
+    #[test]
+    fn test_f_enters_file_path_input_mode() {
+        let mut state = state_with_ports();
+        handle_key(&mut state, key(KeyCode::Char('f')));
+        assert_eq!(state.input_mode, InputMode::FilePathInput(String::new()));
+    }
+
+    #[test]
+    fn test_f_in_local_view_is_noop() {
+        let mut state = state_with_local_ports();
+        handle_key(&mut state, key(KeyCode::Char('f')));
+        assert_eq!(state.input_mode, InputMode::Normal);
+    }
+
+    #[test]
+    fn test_file_path_input_typing() {
+        let mut state = state_with_ports();
+        state.input_mode = InputMode::FilePathInput(String::new());
+        handle_key(&mut state, key(KeyCode::Char('/')));
+        handle_key(&mut state, key(KeyCode::Char('t')));
+        handle_key(&mut state, key(KeyCode::Char('m')));
+        handle_key(&mut state, key(KeyCode::Char('p')));
+        assert_eq!(state.input_mode, InputMode::FilePathInput("/tmp".to_string()));
+    }
+
+    #[test]
+    fn test_file_path_input_backspace() {
+        let mut state = state_with_ports();
+        state.input_mode = InputMode::FilePathInput("/tmp".to_string());
+        handle_key(&mut state, key(KeyCode::Backspace));
+        assert_eq!(state.input_mode, InputMode::FilePathInput("/tm".to_string()));
+    }
+
+    #[test]
+    fn test_file_path_input_esc_cancels() {
+        let mut state = state_with_ports();
+        state.input_mode = InputMode::FilePathInput("/tmp/foo".to_string());
+        handle_key(&mut state, key(KeyCode::Esc));
+        assert_eq!(state.input_mode, InputMode::Normal);
+    }
+
+    #[test]
+    fn test_file_path_input_enter_transitions_to_remote_path() {
+        let mut state = state_with_ports();
+        state.input_mode = InputMode::FilePathInput("/home/user/file.txt".to_string());
+        let action = handle_key(&mut state, key(KeyCode::Enter));
+        assert!(matches!(action, Action::None));
+        assert_eq!(
+            state.input_mode,
+            InputMode::RemotePathInput {
+                local: "/home/user/file.txt".to_string(),
+                remote: "/tmp/home/user/file.txt".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn test_file_path_input_enter_empty_shows_error() {
+        let mut state = state_with_ports();
+        state.input_mode = InputMode::FilePathInput(String::new());
+        handle_key(&mut state, key(KeyCode::Enter));
+        assert_eq!(state.input_mode, InputMode::Normal);
+        assert_eq!(state.status_message.as_deref(), Some("No file path provided"));
+    }
+
+    #[test]
+    fn test_remote_path_input_enter_produces_send_file() {
+        let mut state = state_with_ports();
+        state.input_mode = InputMode::RemotePathInput {
+            local: "/home/user/file.txt".to_string(),
+            remote: "/tmp/home/user/file.txt".to_string(),
+        };
+        let action = handle_key(&mut state, key(KeyCode::Enter));
+        match action {
+            Action::SendFile { local, remote } => {
+                assert_eq!(local, "/home/user/file.txt");
+                assert_eq!(remote, "/tmp/home/user/file.txt");
+            }
+            _ => panic!("Expected SendFile action"),
+        }
+        assert_eq!(state.input_mode, InputMode::Normal);
+    }
+
+    #[test]
+    fn test_remote_path_input_editing() {
+        let mut state = state_with_ports();
+        state.input_mode = InputMode::RemotePathInput {
+            local: "/home/user/file.txt".to_string(),
+            remote: "/tmp".to_string(),
+        };
+        handle_key(&mut state, key(KeyCode::Char('/')));
+        handle_key(&mut state, key(KeyCode::Char('f')));
+        assert_eq!(
+            state.input_mode,
+            InputMode::RemotePathInput {
+                local: "/home/user/file.txt".to_string(),
+                remote: "/tmp/f".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn test_remote_path_input_backspace() {
+        let mut state = state_with_ports();
+        state.input_mode = InputMode::RemotePathInput {
+            local: "/home/user/file.txt".to_string(),
+            remote: "/tmp".to_string(),
+        };
+        handle_key(&mut state, key(KeyCode::Backspace));
+        assert_eq!(
+            state.input_mode,
+            InputMode::RemotePathInput {
+                local: "/home/user/file.txt".to_string(),
+                remote: "/tm".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn test_remote_path_input_esc_cancels() {
+        let mut state = state_with_ports();
+        state.input_mode = InputMode::RemotePathInput {
+            local: "/home/user/file.txt".to_string(),
+            remote: "/tmp/home/user/file.txt".to_string(),
+        };
+        handle_key(&mut state, key(KeyCode::Esc));
+        assert_eq!(state.input_mode, InputMode::Normal);
+    }
+
+    #[test]
+    fn test_remote_path_input_enter_empty_shows_error() {
+        let mut state = state_with_ports();
+        state.input_mode = InputMode::RemotePathInput {
+            local: "/home/user/file.txt".to_string(),
+            remote: String::new(),
+        };
+        handle_key(&mut state, key(KeyCode::Enter));
+        assert_eq!(state.input_mode, InputMode::Normal);
+        assert_eq!(state.status_message.as_deref(), Some("No remote path provided"));
     }
 
     // ---- Search mode tests ----
