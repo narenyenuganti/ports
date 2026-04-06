@@ -32,6 +32,10 @@ pub enum InputMode {
     Search,
     /// Showing help overlay
     Help,
+    /// User is typing a local file path to send
+    FilePathInput(String),
+    /// User is editing the remote destination path
+    RemotePathInput { local: String, remote: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -114,6 +118,7 @@ pub struct AppState {
     pub search_selected: usize,
     pre_search_selected: usize,
     pre_search_local_selected: usize,
+    pub file_transfer_status: Option<String>,
 }
 
 impl AppState {
@@ -135,6 +140,7 @@ impl AppState {
             search_selected: 0,
             pre_search_selected: 0,
             pre_search_local_selected: 0,
+            file_transfer_status: None,
         }
     }
 
