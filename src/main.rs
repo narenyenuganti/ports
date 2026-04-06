@@ -14,10 +14,12 @@ use std::io::stdout;
 use std::sync::Arc;
 use std::time::Duration;
 
+use forward::file::send_file;
 use forward::tunnel::ForwardManager;
 use ssh::config::{load_host_config, HostConfig};
 use ssh::connection::SshSession;
 use ssh::discovery::{discover_local_ports, discover_remote_ports};
+use std::path::Path;
 use tui::app::{AppState, ForwardStatus, ViewMode};
 use tui::input::{handle_key, Action};
 use tui::ui::render;
@@ -182,8 +184,31 @@ async fn run_loop(
                             }
                         }
                     }
-                    Action::SendFile { .. } => {
-                        // Implemented in Task 5
+                    Action::SendFile { local, remote } => {
+                        // Validate local file exists
+                        if !Path::new(&local).exists() {
+                            state.status_message = Some(format!("File not found: {}", local));
+                        } else {
+                            let filename = Path::new(&local)
+                                .file_name()
+                                .map(|n| n.to_string_lossy().to_string())
+                                .unwrap_or_else(|| local.clone());
+                            state.file_transfer_status = Some(format!("Sending {}...", filename));
+                            terminal.draw(|f| render(f, state))?;
+
+                            match send_file(&session, &local, &remote).await {
+                                Ok(()) => {
+                                    state.file_transfer_status = None;
+                                    state.status_message =
+                                        Some(format!("Sent {} -> {}", filename, remote));
+                                }
+                                Err(e) => {
+                                    state.file_transfer_status = None;
+                                    state.status_message =
+                                        Some(format!("Send failed: {}", e));
+                                }
+                            }
+                        }
                     }
                     Action::None => {}
                 }
