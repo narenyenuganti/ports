@@ -8,11 +8,7 @@ use crate::ssh::connection::SshSession;
 ///
 /// Opens an exec channel running `cat > '<remote_path>'`, writes the file
 /// contents to stdin, then checks the exit status.
-pub async fn send_file(
-    session: &SshSession,
-    local_path: &str,
-    remote_path: &str,
-) -> Result<()> {
+pub async fn send_file(session: &SshSession, local_path: &str, remote_path: &str) -> Result<()> {
     // Read local file
     let contents = tokio::fs::read(local_path)
         .await

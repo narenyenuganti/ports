@@ -254,7 +254,11 @@ fn handle_remote_path_input(state: &mut AppState, key: KeyEvent) -> Action {
             Action::None
         }
         KeyCode::Enter => {
-            if let InputMode::RemotePathInput { ref local, ref remote } = state.input_mode {
+            if let InputMode::RemotePathInput {
+                ref local,
+                ref remote,
+            } = state.input_mode
+            {
                 let local = local.clone();
                 let remote = remote.clone();
                 state.input_mode = InputMode::Normal;
@@ -349,19 +353,28 @@ mod tests {
     #[test]
     fn test_quit() {
         let mut state = AppState::new("host".to_string());
-        assert!(matches!(handle_key(&mut state, key(KeyCode::Char('q'))), Action::Quit));
+        assert!(matches!(
+            handle_key(&mut state, key(KeyCode::Char('q'))),
+            Action::Quit
+        ));
     }
 
     #[test]
     fn test_refresh() {
         let mut state = AppState::new("host".to_string());
-        assert!(matches!(handle_key(&mut state, key(KeyCode::Char('r'))), Action::Refresh));
+        assert!(matches!(
+            handle_key(&mut state, key(KeyCode::Char('r'))),
+            Action::Refresh
+        ));
     }
 
     #[test]
     fn test_navigate_down_arrow() {
         let mut state = state_with_ports();
-        assert!(matches!(handle_key(&mut state, key(KeyCode::Down)), Action::None));
+        assert!(matches!(
+            handle_key(&mut state, key(KeyCode::Down)),
+            Action::None
+        ));
         assert_eq!(state.selected, 1);
     }
 
@@ -369,7 +382,10 @@ mod tests {
     fn test_navigate_up_arrow() {
         let mut state = state_with_ports();
         state.selected = 2;
-        assert!(matches!(handle_key(&mut state, key(KeyCode::Up)), Action::None));
+        assert!(matches!(
+            handle_key(&mut state, key(KeyCode::Up)),
+            Action::None
+        ));
         assert_eq!(state.selected, 1);
     }
 
@@ -386,13 +402,19 @@ mod tests {
     fn test_enter_toggles_forward() {
         let mut state = state_with_ports();
         state.selected = 1;
-        assert!(matches!(handle_key(&mut state, key(KeyCode::Enter)), Action::ToggleForward(1)));
+        assert!(matches!(
+            handle_key(&mut state, key(KeyCode::Enter)),
+            Action::ToggleForward(1)
+        ));
     }
 
     #[test]
     fn test_enter_on_empty_ports_does_nothing() {
         let mut state = AppState::new("host".to_string());
-        assert!(matches!(handle_key(&mut state, key(KeyCode::Enter)), Action::None));
+        assert!(matches!(
+            handle_key(&mut state, key(KeyCode::Enter)),
+            Action::None
+        ));
     }
 
     #[test]
@@ -412,7 +434,10 @@ mod tests {
     #[test]
     fn test_unknown_key_does_nothing() {
         let mut state = state_with_ports();
-        assert!(matches!(handle_key(&mut state, key(KeyCode::Char('x'))), Action::None));
+        assert!(matches!(
+            handle_key(&mut state, key(KeyCode::Char('x'))),
+            Action::None
+        ));
         assert_eq!(state.selected, 0);
     }
 
@@ -449,7 +474,10 @@ mod tests {
     fn test_port_input_esc_cancels() {
         let mut state = state_with_ports();
         state.input_mode = InputMode::PortInput("808".to_string());
-        assert!(matches!(handle_key(&mut state, key(KeyCode::Esc)), Action::None));
+        assert!(matches!(
+            handle_key(&mut state, key(KeyCode::Esc)),
+            Action::None
+        ));
         assert_eq!(state.input_mode, InputMode::Normal);
     }
 
@@ -786,7 +814,7 @@ mod tests {
     #[test]
     fn test_o_opens_browser_local_with_sort_active() {
         let mut state = state_with_local_ports(); // ports: 3000, 5000, 8080
-        // Sort by port descending: visual order becomes 8080, 5000, 3000
+                                                  // Sort by port descending: visual order becomes 8080, 5000, 3000
         state.sort.active = Some((1, SortOrder::Descending));
         state.local_selected = 0; // visually 8080
         let action = handle_key(&mut state, key(KeyCode::Char('o')));
@@ -800,7 +828,7 @@ mod tests {
     #[test]
     fn test_o_forwards_and_opens_remote_with_sort_active() {
         let mut state = state_with_ports(); // ports: 8080, 3000, 5000
-        // Sort by port ascending: visual order becomes 3000, 5000, 8080
+                                            // Sort by port ascending: visual order becomes 3000, 5000, 8080
         state.sort.active = Some((1, SortOrder::Ascending));
         state.selected = 0; // visually 3000 (original index 1)
         let action = handle_key(&mut state, key(KeyCode::Char('o')));
@@ -814,7 +842,7 @@ mod tests {
     #[test]
     fn test_enter_toggles_correct_port_with_sort_active() {
         let mut state = state_with_ports(); // unsorted: 8080(idx0), 3000(idx1), 5000(idx2)
-        // Sort by port ascending: visual order 3000, 5000, 8080
+                                            // Sort by port ascending: visual order 3000, 5000, 8080
         state.sort.active = Some((1, SortOrder::Ascending));
         state.selected = 0; // visually 3000 (original index 1)
         let action = handle_key(&mut state, key(KeyCode::Enter));
@@ -859,7 +887,10 @@ mod tests {
         handle_key(&mut state, key(KeyCode::Char('t')));
         handle_key(&mut state, key(KeyCode::Char('m')));
         handle_key(&mut state, key(KeyCode::Char('p')));
-        assert_eq!(state.input_mode, InputMode::FilePathInput("/tmp".to_string()));
+        assert_eq!(
+            state.input_mode,
+            InputMode::FilePathInput("/tmp".to_string())
+        );
     }
 
     #[test]
@@ -867,7 +898,10 @@ mod tests {
         let mut state = state_with_ports();
         state.input_mode = InputMode::FilePathInput("/tmp".to_string());
         handle_key(&mut state, key(KeyCode::Backspace));
-        assert_eq!(state.input_mode, InputMode::FilePathInput("/tm".to_string()));
+        assert_eq!(
+            state.input_mode,
+            InputMode::FilePathInput("/tm".to_string())
+        );
     }
 
     #[test]
@@ -913,7 +947,10 @@ mod tests {
         state.input_mode = InputMode::FilePathInput(String::new());
         handle_key(&mut state, key(KeyCode::Enter));
         assert_eq!(state.input_mode, InputMode::Normal);
-        assert_eq!(state.status_message.as_deref(), Some("No file path provided"));
+        assert_eq!(
+            state.status_message.as_deref(),
+            Some("No file path provided")
+        );
     }
 
     #[test]
@@ -989,7 +1026,10 @@ mod tests {
         };
         handle_key(&mut state, key(KeyCode::Enter));
         assert_eq!(state.input_mode, InputMode::Normal);
-        assert_eq!(state.status_message.as_deref(), Some("No remote path provided"));
+        assert_eq!(
+            state.status_message.as_deref(),
+            Some("No remote path provided")
+        );
     }
 
     // ---- Search mode tests ----
@@ -1076,7 +1116,7 @@ mod tests {
         let mut state = state_with_ports(); // 8080, 3000, 5000
         state.enter_search();
         state.search_selected = 2; // at last item
-        // Type a query that narrows to 1 result
+                                   // Type a query that narrows to 1 result
         handle_key(&mut state, key(KeyCode::Char('8')));
         handle_key(&mut state, key(KeyCode::Char('0')));
         handle_key(&mut state, key(KeyCode::Char('8')));

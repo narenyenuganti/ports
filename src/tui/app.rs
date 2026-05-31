@@ -35,7 +35,10 @@ pub enum InputMode {
     /// User is typing a local file path to send
     FilePathInput(String),
     /// User is editing the remote destination path
-    RemotePathInput { local: String, remote: String },
+    RemotePathInput {
+        local: String,
+        remote: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -263,7 +266,11 @@ impl AppState {
                         let b_name = b.discovered.process_name.as_deref().unwrap_or("");
                         a_name.to_lowercase().cmp(&b_name.to_lowercase())
                     }
-                    4 => a.discovered.pid.unwrap_or(0).cmp(&b.discovered.pid.unwrap_or(0)),
+                    4 => a
+                        .discovered
+                        .pid
+                        .unwrap_or(0)
+                        .cmp(&b.discovered.pid.unwrap_or(0)),
                     _ => std::cmp::Ordering::Equal, // Local Address (col 2) not sortable
                 };
                 match order {
@@ -892,10 +899,7 @@ mod tests {
     #[test]
     fn test_sorted_local_ports_by_port() {
         let mut state = AppState::new("host".to_string());
-        state.update_local_ports(vec![
-            make_port(8080, "nginx"),
-            make_port(3000, "node"),
-        ]);
+        state.update_local_ports(vec![make_port(8080, "nginx"), make_port(3000, "node")]);
         state.sort.active = Some((1, SortOrder::Ascending));
         let sorted = state.sorted_local_ports();
         assert_eq!(sorted[0].port, 3000);
@@ -905,10 +909,7 @@ mod tests {
     #[test]
     fn test_sorted_local_ports_by_process() {
         let mut state = AppState::new("host".to_string());
-        state.update_local_ports(vec![
-            make_port(3000, "zsh"),
-            make_port(8080, "apache"),
-        ]);
+        state.update_local_ports(vec![make_port(3000, "zsh"), make_port(8080, "apache")]);
         state.sort.active = Some((2, SortOrder::Ascending));
         let sorted = state.sorted_local_ports();
         assert_eq!(sorted[0].process_name.as_deref(), Some("apache"));
@@ -1053,10 +1054,7 @@ mod tests {
     #[test]
     fn test_filtered_local_ports() {
         let mut state = AppState::new("host".to_string());
-        state.update_local_ports(vec![
-            make_port(8080, "nginx"),
-            make_port(3000, "node"),
-        ]);
+        state.update_local_ports(vec![make_port(8080, "nginx"), make_port(3000, "node")]);
         state.search_query = "node".to_string();
         let filtered = state.filtered_local_ports();
         assert_eq!(filtered.len(), 1);

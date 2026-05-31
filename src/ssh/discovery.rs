@@ -273,10 +273,7 @@ async fn discover_local_ports_macos() -> Vec<DiscoveredPort> {
 
 async fn discover_local_ports_linux() -> Vec<DiscoveredPort> {
     // Try ss first
-    let output = Command::new("ss")
-        .args(["-tlnp"])
-        .output()
-        .await;
+    let output = Command::new("ss").args(["-tlnp"]).output().await;
 
     if let Ok(out) = output {
         if out.status.success() {
@@ -288,10 +285,7 @@ async fn discover_local_ports_linux() -> Vec<DiscoveredPort> {
     }
 
     // Fall back to netstat
-    let output = Command::new("netstat")
-        .args(["-tlnp"])
-        .output()
-        .await;
+    let output = Command::new("netstat").args(["-tlnp"]).output().await;
 
     match output {
         Ok(out) if out.status.success() => {
