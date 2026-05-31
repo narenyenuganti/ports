@@ -37,6 +37,91 @@ pub trait Engine: Send {
 }
 
 // ---------------------------------------------------------------------------
+// SshEngine
+// ---------------------------------------------------------------------------
+
+use std::sync::Arc;
+
+use crate::forward::tunnel::ForwardManager;
+use crate::ssh::connection::SshSession;
+
+/// The production [`Engine`] backed by the real SSH core.
+///
+/// Holds an optional session and forward manager so the same value can model
+/// the disconnected and connected states. Operations that require a connection
+/// return an error until [`Engine::connect`] has succeeded.
+pub struct SshEngine {
+    session: Option<Arc<SshSession>>,
+    manager: Option<ForwardManager>,
+}
+
+impl SshEngine {
+    /// Create a new, unconnected `SshEngine`.
+    pub fn new() -> Self {
+        Self {
+            session: None,
+            manager: None,
+        }
+    }
+
+    /// Return the active session or a not-connected error.
+    fn session(&self) -> Result<&Arc<SshSession>> {
+        self.session
+            .as_ref()
+            .ok_or_else(|| anyhow!("not connected"))
+    }
+}
+
+impl Default for SshEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl Engine for SshEngine {
+    async fn connect(&mut self, cfg: &HostConfig) -> Result<()> {
+        let session = SshSession::connect(cfg).await?;
+        let arc = Arc::new(session);
+        self.manager = Some(ForwardManager::new(arc.clone()));
+        self.session = Some(arc);
+        Ok(())
+    }
+
+    async fn discover(&self) -> Result<Vec<DiscoveredPort>> {
+        let session = self.session()?;
+        crate::ssh::discovery::discover_remote_ports(session).await
+    }
+
+    async fn start_forward(&mut self, remote: u16, local: Option<u16>) -> Result<u16> {
+        let manager = self
+            .manager
+            .as_mut()
+            .ok_or_else(|| anyhow!("not connected"))?;
+        manager
+            .start_forward("127.0.0.1", remote, local.unwrap_or(0))
+            .await
+    }
+
+    fn stop_forward(&mut self, remote: u16) {
+        if let Some(manager) = self.manager.as_mut() {
+            manager.stop_forward(remote);
+        }
+    }
+
+    fn stop_all(&mut self) {
+        if let Some(manager) = self.manager.as_mut() {
+            manager.stop_all();
+        }
+    }
+
+    async fn send_file(&self, local: &str, remote: &str) -> Result<()> {
+        let session = self.session()?;
+        crate::forward::file::send_file(session, local, remote).await
+    }
+}
+
+// ---------------------------------------------------------------------------
 // MockEngine
 // ---------------------------------------------------------------------------
 
@@ -223,5 +308,33 @@ mod tests {
         engine.connect(&cfg()).await.unwrap();
         assert!(engine.start_forward(5432, None).await.is_err());
         assert!(engine.forwards.is_empty());
+    }
+
+    // ---- SshEngine host-free behavior --------------------------------------
+
+    #[tokio::test]
+    async fn ssh_engine_discover_before_connect_errors() {
+        let engine = SshEngine::new();
+        assert!(engine.discover().await.is_err());
+    }
+
+    #[tokio::test]
+    async fn ssh_engine_start_forward_before_connect_errors() {
+        let mut engine = SshEngine::new();
+        assert!(engine.start_forward(5432, None).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn ssh_engine_send_file_before_connect_errors() {
+        let engine = SshEngine::new();
+        assert!(engine.send_file("/tmp/x", "/tmp/y").await.is_err());
+    }
+
+    #[test]
+    fn ssh_engine_stop_calls_are_noops_when_disconnected() {
+        let mut engine = SshEngine::new();
+        // Must not panic when there is no manager.
+        engine.stop_forward(5432);
+        engine.stop_all();
     }
 }
