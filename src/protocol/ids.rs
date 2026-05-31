@@ -6,22 +6,19 @@ use serde::{Deserialize, Serialize};
 ///
 /// Serializes transparently as a bare JSON number so the wire stays compact
 /// and the Swift mirror can model it as a plain integer.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct ForwardId(pub u64);
 
 /// A TCP port number (local or remote) used in forwarding requests and state.
 ///
 /// Serializes transparently as a bare JSON number.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct Port(pub u16);
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
 
