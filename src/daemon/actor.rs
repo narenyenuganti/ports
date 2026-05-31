@@ -520,10 +520,6 @@ mod tests {
         }
     }
 
-    // Note: Connect calls load_host_config which reads ~/.ssh/config. Tests
-    // that need a real alias point at one unlikely to exist and assert the
-    // UnknownHost path, OR drive state transitions that do not require it.
-
     #[tokio::test(flavor = "current_thread", start_paused = true)]
     async fn set_config_stores_host_without_connecting() {
         let (tx, mut state, cancel, handle) = spawn_actor(MockEngine::with_ports(vec![]));
@@ -537,13 +533,38 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread", start_paused = true)]
-    async fn connect_unknown_host_errors() {
+    async fn connect_without_config_errors() {
+        // Connect before any SetConfig must fail: there is no host to resolve.
         let (tx, _state, cancel, handle) = spawn_actor(MockEngine::with_ports(vec![]));
-        send(&tx, set_config("definitely-not-a-real-host-xyz-123", false))
-            .await
-            .unwrap();
         let res = send(&tx, RequestBody::Connect).await;
         assert!(matches!(res, Err(ProtocolError::UnknownHost { .. })));
+        cancel.cancel();
+        handle.await.unwrap();
+    }
+
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn connect_publishes_connected_with_ports() {
+        // load_host_config returns defaults for any alias (standard ssh
+        // semantics), so with a MockEngine that connects successfully, Connect
+        // reaches Connected and publishes the discovered ports.
+        let (tx, mut state, cancel, handle) = spawn_actor(MockEngine::with_ports(vec![
+            MockEngine::port(5432, Some("postgres"), Some(7)),
+            MockEngine::port(8080, None, None),
+        ]));
+        send(&tx, set_config("anyhost", false)).await.unwrap();
+        send(&tx, RequestBody::Connect).await.unwrap();
+        let snap = loop {
+            let s = state.borrow_and_update().clone();
+            if s.status == ConnStatus::Connected {
+                break s;
+            }
+            state.changed().await.unwrap();
+        };
+        assert_eq!(snap.status, ConnStatus::Connected);
+        assert_eq!(snap.ports.len(), 2);
+        assert_eq!(snap.ports[0].remote_port, Port(5432));
+        assert_eq!(snap.ports[0].process.as_deref(), Some("postgres"));
+        assert_eq!(snap.ports[0].forward, ForwardState::Idle);
         cancel.cancel();
         handle.await.unwrap();
     }
