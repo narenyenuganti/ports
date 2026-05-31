@@ -10,13 +10,12 @@ import SwiftUI
 public struct PopoverView: View {
     @EnvironmentObject var model: AppModel
     @EnvironmentObject var coordinator: AppCoordinator
-    @State private var showSettings = false
 
     public init() {}
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HeaderView(showSettings: $showSettings)
+            HeaderView()
                 .padding(.horizontal, 12)
                 .padding(.top, 10)
                 .padding(.bottom, 8)
@@ -40,13 +39,6 @@ public struct PopoverView: View {
                 .padding(.vertical, 8)
         }
         .frame(width: 340)
-        .sheet(isPresented: $showSettings) {
-            SettingsView()
-                .environmentObject(model)
-        }
-        .task {
-            await coordinator.start()
-        }
     }
 
     @ViewBuilder
@@ -73,8 +65,23 @@ public struct PopoverView: View {
                     }
                 }
             }
-            .frame(maxHeight: 320)
+            .frame(maxHeight: 520)
         }
+    }
+}
+
+// MARK: - Settings action environment
+
+/// Injected by StatusItemController so the gear button can open the AppKit
+/// settings window. Defaults to a no-op (e.g. in previews/tests).
+private struct OpenSettingsActionKey: EnvironmentKey {
+    static let defaultValue: @MainActor () -> Void = {}
+}
+
+extension EnvironmentValues {
+    var openSettingsAction: @MainActor () -> Void {
+        get { self[OpenSettingsActionKey.self] }
+        set { self[OpenSettingsActionKey.self] = newValue }
     }
 }
 
@@ -82,7 +89,7 @@ public struct PopoverView: View {
 
 struct HeaderView: View {
     @EnvironmentObject var model: AppModel
-    @Binding var showSettings: Bool
+    @Environment(\.openSettingsAction) private var openSettings
 
     var body: some View {
         HStack(spacing: 8) {
@@ -99,7 +106,7 @@ struct HeaderView: View {
             }
             Spacer()
             Button {
-                showSettings = true
+                openSettings()
             } label: {
                 Image(systemName: "gearshape")
             }

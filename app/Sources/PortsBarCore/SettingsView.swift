@@ -9,7 +9,6 @@ import SwiftUI
 
 public struct SettingsView: View {
     @EnvironmentObject var model: AppModel
-    @Environment(\.dismiss) private var dismiss
 
     @State private var selectedHost = ""
     @State private var autoReconnect = true
@@ -22,15 +21,6 @@ public struct SettingsView: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("Settings").font(.headline)
-                Spacer()
-                Button("Done") { dismiss() }
-            }
-            .padding(12)
-
-            Divider()
-
             Form {
                 Section("Host") {
                     Picker("Active host", selection: $selectedHost) {

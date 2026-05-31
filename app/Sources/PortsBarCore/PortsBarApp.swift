@@ -1,58 +1,55 @@
+import AppKit
 import SwiftUI
 
 // MARK: - App scene
 //
-// The SwiftUI App lives in the library so the logic is testable; the thin
-// PortsBar executable target (main.swift) calls PortsBarApp.main().
+// The app is an accessory (LSUIElement) menu-bar app. Presentation is driven
+// by AppKit (NSStatusItem + NSPopover) via AppDelegate rather than SwiftUI's
+// MenuBarExtra, which glitches when Pickers/menus open. The SwiftUI App owns
+// only the (unused) Settings scene required by the App protocol; the real
+// settings window is an AppKit NSWindow managed by the delegate.
 
 public struct PortsBarApp: App {
-    @StateObject private var model = AppModel()
-    @StateObject private var coordinator: AppCoordinator
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
-    public init() {
-        let model = AppModel()
-        _model = StateObject(wrappedValue: model)
-        _coordinator = StateObject(wrappedValue: AppCoordinator(model: model))
-    }
+    public init() {}
 
     public var body: some Scene {
-        MenuBarExtra {
-            PopoverView()
-                .environmentObject(model)
-                .environmentObject(coordinator)
-        } label: {
-            MenuBarLabel(model: model)
-        }
-        .menuBarExtraStyle(.window)
+        // Accessory apps show no app menu, so this scene is never presented;
+        // it exists only to satisfy the App protocol's scene requirement.
+        Settings { EmptyView() }
     }
 }
 
-// MARK: - Menu bar label
+// MARK: - AppDelegate
 //
-// SF Symbol "arrow.left.arrow.right" with an active-forward count badge.
-// Dimmed when disconnected; warning tint on error.
+// Owns the shared AppModel/AppCoordinator and the AppKit presentation: the
+// status item + popover (StatusItemController) and the settings window.
 
-struct MenuBarLabel: View {
-    @ObservedObject var model: AppModel
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    let model = AppModel()
+    private(set) lazy var coordinator = AppCoordinator(model: model)
 
-    var body: some View {
-        let count = model.activeForwardCount
-        Image(systemName: "arrow.left.arrow.right")
-            .symbolRenderingMode(.hierarchical)
-            .foregroundStyle(tint)
-            .opacity(model.state.status == .disconnected ? 0.5 : 1.0)
-            .accessibilityLabel("Ports: \(count) active")
-        if count > 0 {
-            Text("\(count)")
-        }
+    private var statusController: StatusItemController?
+    private var settingsWindow: SettingsWindowController?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        statusController = StatusItemController(
+            model: model,
+            coordinator: coordinator,
+            openSettings: { [weak self] in self?.showSettings() }
+        )
+        Task { await coordinator.start() }
     }
 
-    private var tint: Color {
-        switch model.state.status {
-        case .connected: return .primary
-        case .connecting: return .secondary
-        case .disconnected: return .secondary
-        case .error: return .orange
+    /// Show (or focus) the standalone settings window.
+    func showSettings() {
+        if settingsWindow == nil {
+            settingsWindow = SettingsWindowController(model: model)
         }
+        NSApp.activate(ignoringOtherApps: true)
+        settingsWindow?.showWindow(nil)
+        settingsWindow?.window?.makeKeyAndOrderFront(nil)
     }
 }
