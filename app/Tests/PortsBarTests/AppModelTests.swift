@@ -35,7 +35,7 @@ struct AppModelStateTests {
     @Test("applying a State snapshot replaces published state")
     func applyState() {
         let model = AppModel(defaults: makeDefaults())
-        let snapshot = StateSnapshot(
+        let snapshot = PortsState(
             host: "dev-desktop",
             status: .connected,
             statusDetail: nil,
@@ -54,7 +54,7 @@ struct AppModelStateTests {
     @Test("badge counts only forwarding entries")
     func badgeCount() {
         let model = AppModel(defaults: makeDefaults())
-        model.apply(.state(StateSnapshot(
+        model.apply(.state(PortsState(
             host: "h", status: .connected, statusDetail: nil,
             ports: [
                 PortEntry(remotePort: Port(3000), forward: .forwarding(localPort: Port(3000))),
@@ -69,7 +69,7 @@ struct AppModelStateTests {
     @Test("localPort(forRemote:) returns the bound local port")
     func localPortLookup() {
         let model = AppModel(defaults: makeDefaults())
-        model.apply(.state(StateSnapshot(
+        model.apply(.state(PortsState(
             host: "h", status: .connected, statusDetail: nil,
             ports: [
                 PortEntry(remotePort: Port(3000), forward: .forwarding(localPort: Port(13000))),

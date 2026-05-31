@@ -55,7 +55,7 @@ private func decodeAndRoundTrip(_ name: String) throws {
     case let n where n.hasPrefix("forward_state_"):
         try rt(ForwardState.self)
     case "state_snapshot.json":
-        try rt(StateSnapshot.self)
+        try rt(PortsState.self)
     default:
         Issue.record("uncategorized fixture: \(name)")
     }
@@ -229,7 +229,7 @@ struct ProtocolDriftTests {
     @Test("state_snapshot fixture: nil host, error status, status_detail present")
     func stateSnapshotFixture() throws {
         let data = try fixtureData("state_snapshot.json")
-        let snapshot = try decoder.decode(StateSnapshot.self, from: data)
+        let snapshot = try decoder.decode(PortsState.self, from: data)
         #expect(snapshot.host == nil)
         #expect(snapshot.status == .error)
         #expect(snapshot.statusDetail == "connection refused")

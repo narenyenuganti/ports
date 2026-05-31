@@ -217,11 +217,11 @@ public struct PortEntry: Codable, Sendable, Hashable {
     }
 }
 
-// MARK: - StateSnapshot
+// MARK: - PortsState
 //
 // src/protocol/message.rs: host is nullable; status_detail omitted when nil.
 
-public struct StateSnapshot: Codable, Sendable, Hashable {
+public struct PortsState: Codable, Sendable, Hashable {
     public var host: String?
     public var status: ConnStatus
     public var statusDetail: String?
@@ -304,11 +304,11 @@ public enum DaemonEvent: Codable, Sendable, Hashable {
 // MARK: - DaemonMessage
 //
 // src/protocol/message.rs: internally tagged with key "type", snake_case.
-// State(StateSnapshot) and Event(DaemonEvent) are newtype variants whose fields
+// State(PortsState) and Event(DaemonEvent) are newtype variants whose fields
 // sit inline alongside "type". Ack OMITS nil error/hosts.
 
 public enum DaemonMessage: Codable, Sendable, Hashable {
-    case state(StateSnapshot)
+    case state(PortsState)
     case ack(id: UInt64, error: ProtocolError?, hosts: [String]?)
     case event(DaemonEvent)
 
@@ -327,7 +327,7 @@ public enum DaemonMessage: Codable, Sendable, Hashable {
         let type = try tc.decode(String.self, forKey: .type)
         switch type {
         case "state":
-            self = .state(try StateSnapshot(from: decoder))
+            self = .state(try PortsState(from: decoder))
         case "ack":
             let c = try decoder.container(keyedBy: AckKeys.self)
             self = .ack(

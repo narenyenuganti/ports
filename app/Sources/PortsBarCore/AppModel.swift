@@ -67,7 +67,7 @@ struct Preferences: Equatable, Sendable {
 @MainActor
 final class AppModel: ObservableObject {
     /// Latest daemon state. Defaults to disconnected/empty.
-    @Published var state = StateSnapshot(host: nil, status: .disconnected, statusDetail: nil, ports: [])
+    @Published var state = PortsState(host: nil, status: .disconnected, statusDetail: nil, ports: [])
     /// Persisted preferences.
     @Published var prefs: Preferences
     /// Available SSH hosts (from ListHosts Ack).
