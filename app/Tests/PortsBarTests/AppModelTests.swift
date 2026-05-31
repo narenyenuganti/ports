@@ -16,6 +16,14 @@ final class RecordingSender: RequestSending {
     }
 }
 
+/// Records every URL opened through the injectable open-browser seam.
+/// @MainActor-isolated: opens only ever happen on the main actor (AppModel).
+@MainActor
+final class RecordingOpener: URLOpening {
+    private(set) var opened: [URL] = []
+    func open(_ url: URL) { opened.append(url) }
+}
+
 private func makeDefaults() -> UserDefaults {
     UserDefaults(suiteName: "PortsBarTests.\(UUID().uuidString)")!
 }
@@ -93,6 +101,90 @@ struct AppModelStateTests {
         model.apply(.ack(id: 8, error: .bindFailed(port: Port(8080), detail: "in use"), hosts: nil))
         #expect(model.toast?.isError == true)
         #expect(model.toast?.message.contains("8080") == true)
+    }
+
+    @Test("open-on-forward ON: idle->forwarding opens exactly one URL")
+    func openOnForwardOpensOnTransition() {
+        let defaults = makeDefaults()
+        let opener = RecordingOpener()
+        let model = AppModel(defaults: defaults, opener: opener)
+        model.prefs.openBrowserOnForward = true
+
+        // Prior state: port idle.
+        model.apply(.state(PortsState(
+            host: "h", status: .connected, statusDetail: nil,
+            ports: [PortEntry(remotePort: Port(3000), forward: .idle)]
+        )))
+        #expect(opener.opened.isEmpty)
+
+        // Transition: idle -> forwarding(localPort: 13000).
+        model.apply(.state(PortsState(
+            host: "h", status: .connected, statusDetail: nil,
+            ports: [PortEntry(remotePort: Port(3000), forward: .forwarding(localPort: Port(13000)))]
+        )))
+        #expect(opener.opened == [URL(string: "http://localhost:13000")!])
+    }
+
+    @Test("open-on-forward ON: still-forwarding push opens nothing (no duplicate)")
+    func openOnForwardNoDuplicate() {
+        let opener = RecordingOpener()
+        let model = AppModel(defaults: makeDefaults(), opener: opener)
+        model.prefs.openBrowserOnForward = true
+
+        let forwarding = PortsState(
+            host: "h", status: .connected, statusDetail: nil,
+            ports: [PortEntry(remotePort: Port(3000), forward: .forwarding(localPort: Port(13000)))]
+        )
+        model.apply(.state(forwarding))
+        #expect(opener.opened.count == 1)
+
+        // Same port still forwarding on a subsequent refresh push: no re-open.
+        model.apply(.state(forwarding))
+        #expect(opener.opened.count == 1)
+    }
+
+    @Test("open-on-forward OFF: idle->forwarding opens nothing")
+    func openOnForwardOffOpensNothing() {
+        let opener = RecordingOpener()
+        let model = AppModel(defaults: makeDefaults(), opener: opener)
+        model.prefs.openBrowserOnForward = false
+
+        model.apply(.state(PortsState(
+            host: "h", status: .connected, statusDetail: nil,
+            ports: [PortEntry(remotePort: Port(3000), forward: .idle)]
+        )))
+        model.apply(.state(PortsState(
+            host: "h", status: .connected, statusDetail: nil,
+            ports: [PortEntry(remotePort: Port(3000), forward: .forwarding(localPort: Port(13000)))]
+        )))
+        #expect(opener.opened.isEmpty)
+    }
+
+    @Test("open-on-forward ON: two newly-forwarded ports open two URLs")
+    func openOnForwardTwoPorts() {
+        let opener = RecordingOpener()
+        let model = AppModel(defaults: makeDefaults(), opener: opener)
+        model.prefs.openBrowserOnForward = true
+
+        model.apply(.state(PortsState(
+            host: "h", status: .connected, statusDetail: nil,
+            ports: [
+                PortEntry(remotePort: Port(3000), forward: .idle),
+                PortEntry(remotePort: Port(8080), forward: .idle),
+            ]
+        )))
+        model.apply(.state(PortsState(
+            host: "h", status: .connected, statusDetail: nil,
+            ports: [
+                PortEntry(remotePort: Port(3000), forward: .forwarding(localPort: Port(13000))),
+                PortEntry(remotePort: Port(8080), forward: .forwarding(localPort: Port(18080))),
+            ]
+        )))
+        #expect(Set(opener.opened) == [
+            URL(string: "http://localhost:13000")!,
+            URL(string: "http://localhost:18080")!,
+        ])
+        #expect(opener.opened.count == 2)
     }
 
     @Test("successful file transfer raises a success toast")

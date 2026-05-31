@@ -125,9 +125,8 @@ struct PortTileView: View {
     // App-side actions (no daemon round-trip), using the bound local port.
 
     private func openInBrowser() {
-        guard let local = localPort,
-              let url = URL(string: "http://localhost:\(local)") else { return }
-        NSWorkspace.shared.open(url)
+        guard let local = localPort else { return }
+        model.openLocalPort(local)
     }
 
     private func copyURL() {
