@@ -1,0 +1,7 @@
+{
+  "type": "ack",
+  "id": 8,
+  "error": {
+    "kind": "not_connected"
+  }
+}

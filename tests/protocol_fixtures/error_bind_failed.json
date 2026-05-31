@@ -1,0 +1,5 @@
+{
+  "kind": "bind_failed",
+  "port": 8080,
+  "detail": "address in use"
+}

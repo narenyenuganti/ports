@@ -1,0 +1,5 @@
+{
+  "type": "send_file",
+  "local_path": "/tmp/data.bin",
+  "remote_path": "/srv/data.bin"
+}

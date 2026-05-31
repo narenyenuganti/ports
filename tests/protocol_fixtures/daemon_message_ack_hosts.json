@@ -1,0 +1,8 @@
+{
+  "type": "ack",
+  "id": 9,
+  "hosts": [
+    "prod",
+    "staging"
+  ]
+}
