@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import SwiftUI
 
@@ -11,6 +12,24 @@ public protocol RequestSending: Sendable {
 }
 
 extension DaemonClient: RequestSending {}
+
+// MARK: - URL opening abstraction
+//
+// Abstracts NSWorkspace so the open-browser-on-forward behavior is testable
+// without launching a real browser. Production uses NSWorkspace via the default
+// init below. @MainActor because opening is always driven from the main actor.
+
+@MainActor
+public protocol URLOpening {
+    func open(_ url: URL)
+}
+
+/// Production opener: hands the URL to the system default handler.
+@MainActor
+public struct WorkspaceURLOpener: URLOpening {
+    public init() {}
+    public func open(_ url: URL) { NSWorkspace.shared.open(url) }
+}
 
 // MARK: - Toast
 //
@@ -77,12 +96,24 @@ public final class AppModel: ObservableObject {
 
     private let defaults: UserDefaults
     private var sender: (any RequestSending)?
+    private let opener: any URLOpening
     private var nextRequestId: UInt64 = 1
 
-    public init(defaults: UserDefaults = .standard, sender: (any RequestSending)? = nil) {
+    public init(
+        defaults: UserDefaults = .standard,
+        sender: (any RequestSending)? = nil,
+        opener: any URLOpening = WorkspaceURLOpener()
+    ) {
         self.defaults = defaults
         self.sender = sender
+        self.opener = opener
         self.prefs = Preferences.load(from: defaults)
+    }
+
+    /// Open `http://localhost:<port>` via the injected opener (used by views too).
+    func openLocalPort(_ localPort: UInt16) {
+        guard let url = URL(string: "http://localhost:\(localPort)") else { return }
+        opener.open(url)
     }
 
     /// Wire up the transport once the socket is connected.
@@ -116,7 +147,9 @@ public final class AppModel: ObservableObject {
     func apply(_ message: DaemonMessage) {
         switch message {
         case .state(let snapshot):
+            let previous = state
             state = snapshot
+            openNewlyForwardedPorts(previous: previous, current: snapshot)
         case .ack(_, let error, let hostList):
             if let error {
                 showToast(error.userMessage, isError: true)
@@ -126,6 +159,29 @@ public final class AppModel: ObservableObject {
             }
         case .event(let event):
             apply(event)
+        }
+    }
+
+    /// When `openBrowserOnForward` is set, open the browser for each remote port
+    /// that has just TRANSITIONED into forwarding — i.e. it was not forwarding in
+    /// the prior snapshot (idle/error/absent) but is forwarding now. Ports that
+    /// were already forwarding are skipped, so routine refresh/state pushes never
+    /// trigger spurious re-opens.
+    private func openNewlyForwardedPorts(previous: PortsState, current: PortsState) {
+        guard prefs.openBrowserOnForward else { return }
+
+        var previousLocalPort: [UInt16: UInt16] = [:]
+        for entry in previous.ports {
+            if case .forwarding(let local) = entry.forward {
+                previousLocalPort[entry.remotePort.value] = local.value
+            }
+        }
+
+        for entry in current.ports {
+            guard case .forwarding(let local) = entry.forward else { continue }
+            // Already forwarding before (to any local port): not a new transition.
+            if previousLocalPort[entry.remotePort.value] != nil { continue }
+            openLocalPort(local.value)
         }
     }
 
