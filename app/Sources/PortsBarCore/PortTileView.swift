@@ -53,6 +53,10 @@ struct PortTileView: View {
         model.isPortIntentPending(remotePort: remotePort)
     }
 
+    private var isSelected: Bool {
+        model.selectedRemotePort == remotePort
+    }
+
     private var presentation: PortTilePresentation {
         PortTilePresentation(entry: entry)
     }
@@ -73,8 +77,12 @@ struct PortTileView: View {
         .padding(.horizontal, PopoverLayout.portTileHorizontalPadding)
         .padding(.vertical, PopoverLayout.portTileVerticalPadding)
         .background(
-            .quaternary.opacity(0.4),
+            isSelected ? Color.accentColor.opacity(0.16) : Color.secondary.opacity(0.08),
             in: RoundedRectangle(cornerRadius: PopoverLayout.portTileCornerRadius)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: PopoverLayout.portTileCornerRadius)
+                .stroke(isSelected ? Color.accentColor.opacity(0.8) : .clear, lineWidth: 1)
         )
         .onChange(of: localPort) { _, newValue in
             if let newValue {
@@ -185,6 +193,11 @@ struct PortTileView: View {
                 } label: {
                     Label("Copy URL", systemImage: "doc.on.doc")
                 }
+            } else {
+                Button(isPending ? "Forwarding..." : "Forward") {
+                    Task { await model.forward(remotePort: remotePort) }
+                }
+                .disabled(isPending)
             }
             Spacer()
         }
@@ -207,13 +220,12 @@ struct PortTileView: View {
     }
 
     private func handleHeaderTap() {
+        model.select(remotePort: remotePort)
+
         if let localPort {
             customLocalPort = "\(localPort)"
-            expanded.toggle()
-            return
         }
 
-        expanded = true
-        Task { await model.activate(remotePort: remotePort) }
+        expanded.toggle()
     }
 }

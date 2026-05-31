@@ -67,14 +67,24 @@ public struct PopoverView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, 12)
         } else {
-            ScrollView {
-                VStack(spacing: PopoverLayout.portListSpacing) {
-                    ForEach(model.state.ports, id: \.remotePort) { entry in
-                        PortTileView(entry: entry)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(spacing: PopoverLayout.portListSpacing) {
+                        ForEach(model.state.ports, id: \.remotePort) { entry in
+                            PortTileView(entry: entry)
+                                .id(entry.remotePort.value)
+                        }
                     }
                 }
+                .onAppear { model.ensureSelection() }
+                .onChange(of: model.selectedRemotePort) { _, selectedRemotePort in
+                    guard let selectedRemotePort else { return }
+                    withAnimation(.easeOut(duration: 0.12)) {
+                        proxy.scrollTo(selectedRemotePort, anchor: .center)
+                    }
+                }
+                .frame(maxHeight: PopoverLayout.portListMaxHeight)
             }
-            .frame(maxHeight: PopoverLayout.portListMaxHeight)
         }
     }
 }

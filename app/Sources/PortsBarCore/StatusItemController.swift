@@ -18,6 +18,7 @@ final class StatusItemController {
     private let hosting: NSHostingController<AnyView>
     private let makeRoot: @MainActor () -> AnyView
     private var cancellables: Set<AnyCancellable> = []
+    private var keyMonitor: Any?
 
     init(model: AppModel, coordinator: AppCoordinator, openSettings: @escaping @MainActor () -> Void) {
         self.model = model
@@ -37,6 +38,7 @@ final class StatusItemController {
         self.makeRoot = make
         self.hosting = NSHostingController(rootView: make())
         popover.contentViewController = hosting
+        installKeyboardMonitor()
 
         if let button = statusItem.button {
             button.target = self
@@ -84,10 +86,48 @@ final class StatusItemController {
         if popover.isShown {
             popover.performClose(sender)
         } else {
+            model.ensureSelection()
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             // Bring the popover's window forward so it can take key (accessory app).
             popover.contentViewController?.view.window?.makeKey()
         }
+    }
+
+    private func installKeyboardMonitor() {
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self else { return event }
+            let handled = MainActor.assumeIsolated {
+                self.handlePopoverKeyDown(event)
+            }
+            return handled ? nil : event
+        }
+    }
+
+    private func handlePopoverKeyDown(_ event: NSEvent) -> Bool {
+        guard popover.isShown else { return false }
+        guard !isTextInputActive else { return false }
+        guard event.modifierFlags.intersection([.command, .option, .control]).isEmpty else {
+            return false
+        }
+        guard let command = PopoverKeyboardCommand(event: event) else { return false }
+
+        switch command {
+        case .selectPrevious:
+            model.selectPreviousPort()
+        case .selectNext:
+            model.selectNextPort()
+        case .toggleSelected:
+            Task { await model.toggleSelectedPort() }
+        }
+
+        return true
+    }
+
+    private var isTextInputActive: Bool {
+        guard let responder = popover.contentViewController?.view.window?.firstResponder else {
+            return false
+        }
+        return responder is NSTextView || responder is NSTextField
     }
 
     private func updateButton(for state: PortsState) {
