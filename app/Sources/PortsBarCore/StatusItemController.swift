@@ -15,6 +15,8 @@ final class StatusItemController {
     private let statusItem: NSStatusItem
     private let popover: NSPopover
     private let model: AppModel
+    private let hosting: NSHostingController<AnyView>
+    private let makeRoot: @MainActor () -> AnyView
     private var cancellables: Set<AnyCancellable> = []
 
     init(model: AppModel, coordinator: AppCoordinator, openSettings: @escaping @MainActor () -> Void) {
@@ -24,11 +26,17 @@ final class StatusItemController {
         popover = NSPopover()
         popover.behavior = .transient
         popover.animates = false
-        let root = PopoverView()
-            .environmentObject(model)
-            .environmentObject(coordinator)
-            .environment(\.openSettingsAction, openSettings)
-        popover.contentViewController = NSHostingController(rootView: root)
+        let make: @MainActor () -> AnyView = {
+            AnyView(
+                PopoverView()
+                    .environmentObject(model)
+                    .environmentObject(coordinator)
+                    .environment(\.openSettingsAction, openSettings)
+            )
+        }
+        self.makeRoot = make
+        self.hosting = NSHostingController(rootView: make())
+        popover.contentViewController = hosting
 
         if let button = statusItem.button {
             button.target = self
@@ -49,18 +57,26 @@ final class StatusItemController {
                 MainActor.assumeIsolated {
                     guard let self else { return }
                     self.updateButton(for: state)
-                    DispatchQueue.main.async { self.flushPopoverContent() }
+                    self.schedulePopoverContentFlush()
                 }
             }
             .store(in: &cancellables)
         updateButton(for: model.state)
     }
 
-    /// Force the popover's hosted SwiftUI view to process any pending update.
+    /// Force the popover's hosted SwiftUI view to process any pending update by
+    /// rebuilding its root view (SwiftUI's own observation does not re-render a
+    /// detached NSHostingController for async model changes).
     private func flushPopoverContent() {
-        guard popover.isShown, let view = popover.contentViewController?.view else { return }
-        view.needsLayout = true
-        view.layoutSubtreeIfNeeded()
+        guard popover.isShown else { return }
+        hosting.rootView = makeRoot()
+    }
+
+    private func schedulePopoverContentFlush() {
+        Task { @MainActor [weak self] in
+            await Task.yield()
+            self?.flushPopoverContent()
+        }
     }
 
     @objc private func togglePopover(_ sender: Any?) {

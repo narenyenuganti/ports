@@ -23,6 +23,10 @@ struct PortTileView: View {
 
     private var isForwarding: Bool { localPort != nil }
 
+    private var isPending: Bool {
+        model.isPortIntentPending(remotePort: remotePort)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Button {
@@ -88,7 +92,10 @@ struct PortTileView: View {
     private var actions: some View {
         HStack(spacing: 8) {
             if isForwarding {
-                Button("Stop") { Task { await model.stop(remotePort: remotePort) } }
+                Button(isPending ? "Stopping..." : "Stop") {
+                    Task { await model.stop(remotePort: remotePort) }
+                }
+                .disabled(isPending)
                 Button {
                     openInBrowser()
                 } label: {
@@ -100,7 +107,10 @@ struct PortTileView: View {
                     Label("Copy URL", systemImage: "doc.on.doc")
                 }
             } else {
-                Button("Forward") { Task { await model.forward(remotePort: remotePort) } }
+                Button(isPending ? "Forwarding..." : "Forward") {
+                    Task { await model.forward(remotePort: remotePort) }
+                }
+                .disabled(isPending)
             }
             Spacer()
         }
@@ -118,8 +128,9 @@ struct PortTileView: View {
                 }
             }
             .controlSize(.small)
-            .disabled(UInt16(customLocalPort) == nil)
+            .disabled(isPending || UInt16(customLocalPort) == nil)
         }
+        .disabled(isPending)
     }
 
     // App-side actions (no daemon round-trip), using the bound local port.

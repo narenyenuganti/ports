@@ -259,6 +259,42 @@ struct AppModelIntentTests {
         #expect(lp == nil)
     }
 
+    @Test("repeated forward clicks while pending send one request")
+    func repeatedForwardClicksWhilePendingSendOneRequest() async {
+        let sender = RecordingSender()
+        let model = AppModel(defaults: makeDefaults(), sender: sender)
+        await model.forward(remotePort: 3000)
+        await model.forward(remotePort: 3000)
+        let requests = await sender.log.requests
+        #expect(requests.count == 1)
+    }
+
+    @Test("forward click is accepted again after daemon state resolves pending request")
+    func forwardClickAcceptedAfterStateResolution() async {
+        let sender = RecordingSender()
+        let model = AppModel(defaults: makeDefaults(), sender: sender)
+        await model.forward(remotePort: 3000)
+        model.apply(.state(PortsState(
+            host: "h",
+            status: .connected,
+            statusDetail: nil,
+            ports: [PortEntry(remotePort: Port(3000), forward: .forwarding(localPort: Port(13000)))]
+        )))
+        await model.forward(remotePort: 3000)
+        let requests = await sender.log.requests
+        #expect(requests.count == 2)
+    }
+
+    @Test("repeated stop clicks while pending send one request")
+    func repeatedStopClicksWhilePendingSendOneRequest() async {
+        let sender = RecordingSender()
+        let model = AppModel(defaults: makeDefaults(), sender: sender)
+        await model.stop(remotePort: 5432)
+        await model.stop(remotePort: 5432)
+        let requests = await sender.log.requests
+        #expect(requests.count == 1)
+    }
+
     @Test("stop sends stop_forward")
     func stopIntent() async {
         let sender = RecordingSender()

@@ -41,6 +41,11 @@ public struct Toast: Identifiable, Equatable, Sendable {
     public var isError: Bool
 }
 
+private enum PendingPortIntent: Equatable, Sendable {
+    case start
+    case stop
+}
+
 // MARK: - Preferences
 //
 // Persisted to UserDefaults; the daemon-relevant subset is pushed via SetConfig.
@@ -98,6 +103,8 @@ public final class AppModel: ObservableObject {
     private var sender: (any RequestSending)?
     private let opener: any URLOpening
     private var nextRequestId: UInt64 = 1
+    @Published private var pendingPortIntents: [UInt16: PendingPortIntent] = [:]
+    private var pendingRequestPorts: [UInt64: UInt16] = [:]
 
     public init(
         defaults: UserDefaults = .standard,
@@ -141,6 +148,10 @@ public final class AppModel: ObservableObject {
         return nil
     }
 
+    func isPortIntentPending(remotePort: UInt16) -> Bool {
+        pendingPortIntents[remotePort] != nil
+    }
+
     // MARK: Applying daemon messages
 
     /// Apply a decoded daemon message to the published state (main-actor isolated).
@@ -149,11 +160,17 @@ public final class AppModel: ObservableObject {
         case .state(let snapshot):
             let previous = state
             state = snapshot
+            resolvePendingPortIntents(with: snapshot)
             rememberConnectedHost(snapshot)
             openNewlyForwardedPorts(previous: previous, current: snapshot)
-        case .ack(_, let error, let hostList):
+        case .ack(let id, let error, let hostList):
             if let error {
+                if let remotePort = pendingRequestPorts.removeValue(forKey: id) {
+                    pendingPortIntents.removeValue(forKey: remotePort)
+                }
                 showToast(error.userMessage, isError: true)
+            } else {
+                pendingRequestPorts.removeValue(forKey: id)
             }
             if let hostList {
                 hosts = hostList
@@ -227,19 +244,25 @@ public final class AppModel: ObservableObject {
     }
 
     func forward(remotePort: UInt16, localPort: UInt16? = nil) async {
+        guard beginPortIntent(.start, remotePort: remotePort) else { return }
         await send(.startForward(
             remotePort: Port(remotePort),
             localPort: localPort.map(Port.init)
-        ))
+        ), pendingRemotePort: remotePort)
     }
 
     func stop(remotePort: UInt16) async {
-        await send(.stopForward(remotePort: Port(remotePort)))
+        guard beginPortIntent(.stop, remotePort: remotePort) else { return }
+        await send(.stopForward(remotePort: Port(remotePort)), pendingRemotePort: remotePort)
     }
 
     /// Re-forward a remote port pinned to a specific local port.
     func setLocalPort(remotePort: UInt16, localPort: UInt16) async {
-        await send(.startForward(remotePort: Port(remotePort), localPort: Port(localPort)))
+        guard beginPortIntent(.start, remotePort: remotePort) else { return }
+        await send(
+            .startForward(remotePort: Port(remotePort), localPort: Port(localPort)),
+            pendingRemotePort: remotePort
+        )
     }
 
     func sendFile(localPath: String, remotePath: String? = nil) async {
@@ -272,14 +295,52 @@ public final class AppModel: ObservableObject {
 
     // MARK: Sending
 
-    private func send(_ body: RequestBody) async {
-        guard let sender else { return }
+    private func send(_ body: RequestBody, pendingRemotePort: UInt16? = nil) async {
+        guard let sender else {
+            if let pendingRemotePort {
+                pendingPortIntents.removeValue(forKey: pendingRemotePort)
+            }
+            return
+        }
         let id = nextRequestId
         nextRequestId &+= 1
+        if let pendingRemotePort {
+            pendingRequestPorts[id] = pendingRemotePort
+        }
         do {
             try await sender.send(Request(id: id, body: body))
         } catch {
+            if let pendingRemotePort {
+                pendingRequestPorts.removeValue(forKey: id)
+                pendingPortIntents.removeValue(forKey: pendingRemotePort)
+            }
             showToast("Request failed: \(error)", isError: true)
+        }
+    }
+
+    private func beginPortIntent(_ intent: PendingPortIntent, remotePort: UInt16) -> Bool {
+        guard pendingPortIntents[remotePort] == nil else { return false }
+        pendingPortIntents[remotePort] = intent
+        return true
+    }
+
+    private func resolvePendingPortIntents(with snapshot: PortsState) {
+        let statesByRemotePort = Dictionary(
+            uniqueKeysWithValues: snapshot.ports.map { ($0.remotePort.value, $0.forward) }
+        )
+
+        for (remotePort, intent) in pendingPortIntents {
+            guard let forward = statesByRemotePort[remotePort] else {
+                pendingPortIntents.removeValue(forKey: remotePort)
+                continue
+            }
+
+            switch (intent, forward) {
+            case (.start, .forwarding), (.start, .error), (.stop, .idle), (.stop, .error):
+                pendingPortIntents.removeValue(forKey: remotePort)
+            default:
+                break
+            }
         }
     }
 }
