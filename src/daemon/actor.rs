@@ -62,6 +62,34 @@ impl ActorHandle {
     }
 }
 
+/// Depth of the bounded request queue feeding the actor.
+const ACTOR_QUEUE_DEPTH: usize = 64;
+
+/// Spawn an actor task driving `engine` and return a handle plus its
+/// `JoinHandle`.
+///
+/// The actor runs until it receives `Shutdown` or `cancel` is triggered. On
+/// shutdown it stops all forwards. The returned [`ActorHandle`] carries both a
+/// bounded request sender and a `watch` receiver for the published
+/// [`StateSnapshot`]. Callers should cancel-and-await the `JoinHandle` to
+/// drain the actor cleanly.
+pub fn spawn(
+    engine: Box<dyn Engine>,
+    cancel: CancellationToken,
+) -> (ActorHandle, tokio::task::JoinHandle<()>) {
+    let (actor, state_rx) = Actor::new(engine);
+    let (tx, rx) = mpsc::channel(ACTOR_QUEUE_DEPTH);
+    let child = cancel.child_token();
+    let join = tokio::spawn(actor.run(rx, child));
+    (
+        ActorHandle {
+            tx,
+            state: state_rx,
+        },
+        join,
+    )
+}
+
 /// The active runtime configuration set via `SetConfig`.
 struct ActiveConfig {
     alias: String,

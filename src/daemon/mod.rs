@@ -10,6 +10,7 @@
 
 pub mod actor;
 pub mod engine;
+pub mod server;
 
 use std::path::PathBuf;
 
