@@ -149,6 +149,7 @@ public final class AppModel: ObservableObject {
         case .state(let snapshot):
             let previous = state
             state = snapshot
+            rememberConnectedHost(snapshot)
             openNewlyForwardedPorts(previous: previous, current: snapshot)
         case .ack(_, let error, let hostList):
             if let error {
@@ -183,6 +184,19 @@ public final class AppModel: ObservableObject {
             if previousLocalPort[entry.remotePort.value] != nil { continue }
             openLocalPort(local.value)
         }
+    }
+
+    /// Persist the host the daemon reports while connected, so the last
+    /// connection is restored on the next launch regardless of how it was
+    /// chosen (Settings picker or daemon default).
+    private func rememberConnectedHost(_ snapshot: PortsState) {
+        guard snapshot.status == .connected,
+              let host = snapshot.host,
+              !host.isEmpty,
+              host != prefs.host
+        else { return }
+        prefs.host = host
+        prefs.save(to: defaults)
     }
 
     private func apply(_ event: DaemonEvent) {

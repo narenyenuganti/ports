@@ -59,6 +59,31 @@ struct AppModelStateTests {
         #expect(model.state.ports.count == 2)
     }
 
+    @Test("connected snapshot persists host for next launch")
+    func remembersConnectedHost() {
+        let defaults = makeDefaults()
+        let model = AppModel(defaults: defaults)
+        #expect(model.prefs.host == "")
+
+        model.apply(.state(PortsState(
+            host: "dev-desktop", status: .connected, statusDetail: nil, ports: [])))
+
+        #expect(model.prefs.host == "dev-desktop")
+        // A fresh model reading the same defaults restores it.
+        #expect(AppModel(defaults: defaults).prefs.host == "dev-desktop")
+    }
+
+    @Test("disconnected snapshot does not overwrite remembered host")
+    func keepsHostWhenDisconnected() {
+        let defaults = makeDefaults()
+        let model = AppModel(defaults: defaults)
+        model.apply(.state(PortsState(
+            host: "dev-desktop", status: .connected, statusDetail: nil, ports: [])))
+        model.apply(.state(PortsState(
+            host: nil, status: .disconnected, statusDetail: nil, ports: [])))
+        #expect(model.prefs.host == "dev-desktop")
+    }
+
     @Test("badge counts only forwarding entries")
     func badgeCount() {
         let model = AppModel(defaults: makeDefaults())
