@@ -1,15 +1,6 @@
-import SwiftUI
+import Foundation
 
-/// Menu-bar entry point for Ports.app.
-///
-/// This stub is fleshed out in Task 3.5 with the `MenuBarExtra` scene; for now
-/// it exists so the package builds under Swift 6 strict concurrency.
-@main
-struct PortsBarApp: App {
-    var body: some Scene {
-        // Placeholder scene; replaced by the MenuBarExtra in Task 3.5.
-        Settings {
-            EmptyView()
-        }
-    }
+// Minimal stub for the initial build. Replaced with the @main App scene in 3.5.
+enum PortsBar {
+    static let appName = "PortsBar"
 }
