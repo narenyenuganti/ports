@@ -1,0 +1,40 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <clipPath id="squircle">
+      <rect x="100" y="100" width="824" height="824" rx="184" ry="184"></rect>
+    </clipPath>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.42"></stop>
+      <stop offset="55%" stop-color="#ffffff" stop-opacity="0"></stop>
+    </linearGradient>
+    <linearGradient id="bottomShade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="62%" stop-color="#000000" stop-opacity="0"></stop>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0.16"></stop>
+    </linearGradient>
+    <filter id="iconShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="20" stdDeviation="26" flood-color="#000000" flood-opacity="0.34"></feDropShadow>
+    </filter>
+    <filter id="armShadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="0.18" stdDeviation="0.16" flood-color="#000000" flood-opacity="0.28"></feDropShadow>
+    </filter>
+  </defs>
+
+  
+  <rect x="100" y="100" width="824" height="824" rx="184" ry="184" fill="#6FBE75" filter="url(#iconShadow)"></rect>
+
+  
+  <g clip-path="url(#squircle)">
+    <rect x="100" y="100" width="824" height="824" fill="url(#bottomShade)"></rect>
+    <rect x="100" y="100" width="824" height="824" fill="url(#sheen)"></rect>
+    
+    <rect x="100" y="100" width="824" height="824" rx="184" ry="184" fill="none" stroke="#ffffff" stroke-opacity="0.18" stroke-width="3"></rect>
+  </g>
+
+  
+  <g transform="translate(292,292) scale(18.333)" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" filter="url(#armShadow)">
+    <path d="M8 3 4 7l4 4"></path>
+    <path d="M4 7h16"></path>
+    <path d="m16 21 4-4-4-4"></path>
+    <path d="M20 17H4"></path>
+  </g>
+</svg>

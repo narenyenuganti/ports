@@ -18,11 +18,13 @@
 SHELL := /bin/bash
 
 BUILD_DIR      := build
+ASSETS_DIR     := assets
 APP            := $(BUILD_DIR)/Ports.app
 CONTENTS       := $(APP)/Contents
 MACOS_DIR      := $(CONTENTS)/MacOS
 RESOURCES_DIR  := $(CONTENTS)/Resources
 INFO_PLIST     := $(CONTENTS)/Info.plist
+APP_ICON       := $(ASSETS_DIR)/AppIcon.icns
 
 BUNDLE_ID      := com.ports.app
 APP_NAME       := Ports
@@ -78,6 +80,7 @@ bundle: ports swift
 	@chmod +x "$(MACOS_DIR)/$(SWIFT_EXE)"
 	@cp "$(BUILD_DIR)/ports" "$(RESOURCES_DIR)/ports"
 	@chmod +x "$(RESOURCES_DIR)/ports"
+	@cp "$(APP_ICON)" "$(RESOURCES_DIR)/AppIcon.icns"
 	@printf '%s' '<?xml version="1.0" encoding="UTF-8"?>' > "$(INFO_PLIST)"
 	@printf '%s' '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' >> "$(INFO_PLIST)"
 	@{ \
@@ -87,6 +90,8 @@ bundle: ports swift
 		echo '	<string>$(BUNDLE_ID)</string>'; \
 		echo '	<key>CFBundleName</key>'; \
 		echo '	<string>$(APP_NAME)</string>'; \
+		echo '	<key>CFBundleIconFile</key>'; \
+		echo '	<string>AppIcon</string>'; \
 		echo '	<key>CFBundleExecutable</key>'; \
 		echo '	<string>$(SWIFT_EXE)</string>'; \
 		echo '	<key>CFBundlePackageType</key>'; \

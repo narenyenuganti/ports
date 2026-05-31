@@ -16,7 +16,9 @@ APP="build/Ports.app"
 PORTS_BIN="$APP/Contents/Resources/ports"
 SWIFT_BIN="$APP/Contents/MacOS/PortsBar"
 INFO_PLIST="$APP/Contents/Info.plist"
+APP_ICON="$APP/Contents/Resources/AppIcon.icns"
 EXPECTED_BUNDLE_ID="com.ports.app"
+EXPECTED_ICON_FILE="AppIcon"
 
 PASS_PREFIX="PASS"
 FAIL_PREFIX="FAIL"
@@ -155,6 +157,13 @@ ok "Info.plist present and parseable"
 bundle_id="$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$INFO_PLIST" 2>/dev/null || true)"
 [ "$bundle_id" = "$EXPECTED_BUNDLE_ID" ] || fail "CFBundleIdentifier is '$bundle_id', expected '$EXPECTED_BUNDLE_ID'"
 ok "CFBundleIdentifier = $EXPECTED_BUNDLE_ID"
+
+icon_file="$(/usr/libexec/PlistBuddy -c "Print :CFBundleIconFile" "$INFO_PLIST" 2>/dev/null || true)"
+[ "$icon_file" = "$EXPECTED_ICON_FILE" ] || fail "CFBundleIconFile is '$icon_file', expected '$EXPECTED_ICON_FILE'"
+ok "CFBundleIconFile = $EXPECTED_ICON_FILE"
+
+[ -f "$APP_ICON" ] || fail "app icon missing: $APP_ICON"
+ok "app icon resource present: $APP_ICON"
 
 lsui="$(/usr/libexec/PlistBuddy -c "Print :LSUIElement" "$INFO_PLIST" 2>/dev/null || true)"
 [ "$lsui" = "true" ] || fail "LSUIElement is '$lsui', expected 'true'"
