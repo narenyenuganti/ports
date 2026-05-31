@@ -382,9 +382,9 @@ struct AppModelIntentTests {
         model.select(remotePort: 5432)
 
         model.beginPortFilter()
-        model.appendPortFilter("no")
+        model.appendPortFilter("80")
 
-        #expect(model.portFilter == "no")
+        #expect(model.portFilter == "80")
         #expect(model.visiblePorts.map(\.remotePort.value) == [8080])
         #expect(model.selectedRemotePort == 8080)
     }
@@ -404,7 +404,7 @@ struct AppModelIntentTests {
         )))
         model.select(remotePort: 5432)
 
-        model.beginPortFilter(with: "no")
+        model.beginPortFilter(with: "80")
         model.cancelPortFilter()
 
         #expect(model.portFilter == "")
@@ -426,10 +426,10 @@ struct AppModelIntentTests {
             ]
         )))
 
-        model.beginPortFilter(with: "nod")
+        model.beginPortFilter(with: "808")
         model.deletePortFilterCharacter()
 
-        #expect(model.portFilter == "no")
+        #expect(model.portFilter == "80")
         #expect(model.visiblePorts.map(\.remotePort.value) == [8080])
     }
 
@@ -446,11 +446,31 @@ struct AppModelIntentTests {
             ]
         )))
 
-        model.appendPortFilter("no")
+        model.appendPortFilter("80")
 
         #expect(model.isPortFiltering)
-        #expect(model.portFilter == "no")
+        #expect(model.portFilter == "80")
         #expect(model.visiblePorts.map(\.remotePort.value) == [8080])
+    }
+
+    @Test("non-numeric typing does not start filtering")
+    func nonNumericTypingDoesNotStartFiltering() {
+        let model = AppModel(defaults: makeDefaults())
+        model.apply(.state(PortsState(
+            host: "h",
+            status: .connected,
+            statusDetail: nil,
+            ports: [
+                PortEntry(remotePort: Port(3000), process: "next-server", forward: .idle),
+                PortEntry(remotePort: Port(8080), process: "node", forward: .idle),
+            ]
+        )))
+
+        model.appendPortFilter("n")
+
+        #expect(!model.isPortFiltering)
+        #expect(model.portFilter == "")
+        #expect(model.visiblePorts.map(\.remotePort.value) == [3000, 8080])
     }
 
     @Test("repeated forward clicks while pending send one request")

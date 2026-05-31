@@ -46,7 +46,7 @@ enum PopoverKeyboardCommand: Equatable {
                 default:
                     guard charactersIgnoringModifiers.count == 1,
                           let scalar = charactersIgnoringModifiers.unicodeScalars.first,
-                          !CharacterSet.controlCharacters.contains(scalar)
+                          (48...57).contains(scalar.value)
                     else { return nil }
                     self = .appendFilter(charactersIgnoringModifiers)
                 }

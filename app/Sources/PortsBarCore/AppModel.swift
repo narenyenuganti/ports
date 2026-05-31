@@ -187,15 +187,17 @@ public final class AppModel: ObservableObject {
             preFilterSelectedRemotePort = selectedRemotePort
         }
         isPortFiltering = true
-        portFilter = initialQuery
+        portFilter = Self.decimalDigits(in: initialQuery)
         syncSelectedPort()
     }
 
     func appendPortFilter(_ text: String) {
+        let digits = Self.decimalDigits(in: text)
+        guard !digits.isEmpty else { return }
         if !isPortFiltering {
             beginPortFilter()
         }
-        portFilter.append(text)
+        portFilter.append(digits)
         syncSelectedPort()
     }
 
@@ -474,6 +476,14 @@ public final class AppModel: ObservableObject {
                 break
             }
         }
+    }
+
+    private static func decimalDigits(in text: String) -> String {
+        var digits = ""
+        for scalar in text.unicodeScalars where (48...57).contains(scalar.value) {
+            digits.unicodeScalars.append(scalar)
+        }
+        return digits
     }
 }
 
