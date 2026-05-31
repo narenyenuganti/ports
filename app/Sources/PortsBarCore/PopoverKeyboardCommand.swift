@@ -4,6 +4,10 @@ enum PopoverKeyboardCommand: Equatable {
     case selectPrevious
     case selectNext
     case toggleSelected
+    case beginFilter
+    case appendFilter(String)
+    case deleteFilterCharacter
+    case cancelFilter
 
     init?(event: NSEvent) {
         self.init(
@@ -20,16 +24,32 @@ enum PopoverKeyboardCommand: Equatable {
             self = .selectNext
         case .carriageReturn, .enter:
             self = .toggleSelected
+        case .delete, .deleteForward:
+            self = .deleteFilterCharacter
         default:
-            switch charactersIgnoringModifiers?.lowercased() {
-            case "k":
-                self = .selectPrevious
-            case "j":
-                self = .selectNext
+            guard let charactersIgnoringModifiers else { return nil }
+            switch charactersIgnoringModifiers {
+            case "\u{1B}":
+                self = .cancelFilter
+            case "\u{7F}", "\u{8}":
+                self = .deleteFilterCharacter
+            case "/":
+                self = .beginFilter
             case "\r", "\n":
                 self = .toggleSelected
             default:
-                return nil
+                switch charactersIgnoringModifiers.lowercased() {
+                case "k":
+                    self = .selectPrevious
+                case "j":
+                    self = .selectNext
+                default:
+                    guard charactersIgnoringModifiers.count == 1,
+                          let scalar = charactersIgnoringModifiers.unicodeScalars.first,
+                          (48...57).contains(scalar.value)
+                    else { return nil }
+                    self = .appendFilter(charactersIgnoringModifiers)
+                }
             }
         }
     }

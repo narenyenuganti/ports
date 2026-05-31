@@ -117,7 +117,23 @@ final class StatusItemController {
         case .selectNext:
             model.selectNextPort()
         case .toggleSelected:
-            Task { await model.toggleSelectedPort() }
+            if model.isPortFiltering {
+                model.confirmPortFilter()
+            } else {
+                Task { await model.toggleSelectedPort() }
+            }
+        case .beginFilter:
+            if model.isPortFiltering {
+                model.appendPortFilter("/")
+            } else {
+                model.beginPortFilter()
+            }
+        case .appendFilter(let text):
+            model.appendPortFilter(text)
+        case .deleteFilterCharacter:
+            model.deletePortFilterCharacter()
+        case .cancelFilter:
+            model.cancelPortFilter()
         }
 
         return true

@@ -100,6 +100,10 @@ public final class AppModel: ObservableObject {
     @Published public var toast: Toast?
     /// Currently highlighted port in the popover's keyboard-navigable list.
     @Published var selectedRemotePort: UInt16?
+    /// Active port-list filter query.
+    @Published var portFilter = ""
+    /// Whether the popover is currently in filter mode.
+    @Published var isPortFiltering = false
 
     private let defaults: UserDefaults
     private var sender: (any RequestSending)?
@@ -107,6 +111,7 @@ public final class AppModel: ObservableObject {
     private var nextRequestId: UInt64 = 1
     @Published private var pendingPortIntents: [UInt16: PendingPortIntent] = [:]
     private var pendingRequestPorts: [UInt64: UInt16] = [:]
+    private var preFilterSelectedRemotePort: UInt16?
 
     public init(
         defaults: UserDefaults = .standard,
@@ -142,6 +147,12 @@ public final class AppModel: ObservableObject {
 
     var isConnected: Bool { state.status == .connected }
 
+    var visiblePorts: [PortEntry] {
+        let query = portFilter.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isPortFiltering, !query.isEmpty else { return state.ports }
+        return state.ports.filter { $0.matchesFilter(query) }
+    }
+
     /// The local port a remote port is currently forwarded to, if forwarding.
     func localPort(forRemote remotePort: UInt16) -> UInt16? {
         for entry in state.ports where entry.remotePort.value == remotePort {
@@ -160,7 +171,7 @@ public final class AppModel: ObservableObject {
     }
 
     func ensureSelection() {
-        syncSelectedPort(with: state)
+        syncSelectedPort()
     }
 
     func selectPreviousPort() {
@@ -171,6 +182,52 @@ public final class AppModel: ObservableObject {
         moveSelection(by: 1)
     }
 
+    func beginPortFilter(with initialQuery: String = "") {
+        if !isPortFiltering {
+            preFilterSelectedRemotePort = selectedRemotePort
+        }
+        isPortFiltering = true
+        portFilter = Self.decimalDigits(in: initialQuery)
+        syncSelectedPort()
+    }
+
+    func appendPortFilter(_ text: String) {
+        let digits = Self.decimalDigits(in: text)
+        guard !digits.isEmpty else { return }
+        if !isPortFiltering {
+            beginPortFilter()
+        }
+        portFilter.append(digits)
+        syncSelectedPort()
+    }
+
+    func deletePortFilterCharacter() {
+        guard isPortFiltering else { return }
+        if !portFilter.isEmpty {
+            portFilter.removeLast()
+        }
+        syncSelectedPort()
+    }
+
+    func confirmPortFilter() {
+        isPortFiltering = false
+        portFilter = ""
+        preFilterSelectedRemotePort = nil
+        syncSelectedPort()
+    }
+
+    func cancelPortFilter() {
+        let restore = preFilterSelectedRemotePort
+        isPortFiltering = false
+        portFilter = ""
+        preFilterSelectedRemotePort = nil
+        if let restore, state.ports.contains(where: { $0.remotePort.value == restore }) {
+            selectedRemotePort = restore
+        } else {
+            syncSelectedPort()
+        }
+    }
+
     // MARK: Applying daemon messages
 
     /// Apply a decoded daemon message to the published state (main-actor isolated).
@@ -179,7 +236,7 @@ public final class AppModel: ObservableObject {
         case .state(let snapshot):
             let previous = state
             state = snapshot
-            syncSelectedPort(with: snapshot)
+            syncSelectedPort()
             resolvePendingPortIntents(with: snapshot)
             rememberConnectedHost(snapshot)
             openNewlyForwardedPorts(previous: previous, current: snapshot)
@@ -363,19 +420,25 @@ public final class AppModel: ObservableObject {
         return state.ports.firstIndex { $0.remotePort.value == selectedRemotePort }
     }
 
+    private var selectedVisiblePortIndex: Int? {
+        guard let selectedRemotePort else { return nil }
+        return visiblePorts.firstIndex { $0.remotePort.value == selectedRemotePort }
+    }
+
     private var selectedPortEntry: PortEntry? {
         guard let selectedPortIndex else { return nil }
         return state.ports[selectedPortIndex]
     }
 
-    private func syncSelectedPort(with snapshot: PortsState) {
-        guard let first = snapshot.ports.first else {
+    private func syncSelectedPort() {
+        let ports = visiblePorts
+        guard let first = ports.first else {
             selectedRemotePort = nil
             return
         }
 
         if let selectedRemotePort,
-           snapshot.ports.contains(where: { $0.remotePort.value == selectedRemotePort }) {
+           ports.contains(where: { $0.remotePort.value == selectedRemotePort }) {
             return
         }
 
@@ -383,15 +446,16 @@ public final class AppModel: ObservableObject {
     }
 
     private func moveSelection(by offset: Int) {
-        guard !state.ports.isEmpty else {
+        let ports = visiblePorts
+        guard !ports.isEmpty else {
             selectedRemotePort = nil
             return
         }
 
         ensureSelection()
-        let current = selectedPortIndex ?? 0
-        let next = min(max(current + offset, 0), state.ports.count - 1)
-        selectedRemotePort = state.ports[next].remotePort.value
+        let current = selectedVisiblePortIndex ?? 0
+        let next = min(max(current + offset, 0), ports.count - 1)
+        selectedRemotePort = ports[next].remotePort.value
     }
 
     private func resolvePendingPortIntents(with snapshot: PortsState) {
@@ -412,6 +476,30 @@ public final class AppModel: ObservableObject {
                 break
             }
         }
+    }
+
+    private static func decimalDigits(in text: String) -> String {
+        var digits = ""
+        for scalar in text.unicodeScalars where (48...57).contains(scalar.value) {
+            digits.unicodeScalars.append(scalar)
+        }
+        return digits
+    }
+}
+
+// MARK: - PortEntry filtering
+
+extension PortEntry {
+    func matchesFilter(_ query: String) -> Bool {
+        let needle = query.lowercased()
+        if remotePort.value.description.contains(needle) { return true }
+        if let process, process.lowercased().contains(needle) { return true }
+        if let pid, pid.description.contains(needle) { return true }
+        if case .forwarding(let localPort) = forward,
+           localPort.value.description.contains(needle) {
+            return true
+        }
+        return false
     }
 }
 

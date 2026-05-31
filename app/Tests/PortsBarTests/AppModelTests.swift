@@ -366,6 +366,113 @@ struct AppModelIntentTests {
         #expect(remotePort == Port(8080))
     }
 
+    @Test("filtering narrows visible ports and selection")
+    func filteringNarrowsVisiblePortsAndSelection() {
+        let model = AppModel(defaults: makeDefaults())
+        model.apply(.state(PortsState(
+            host: "h",
+            status: .connected,
+            statusDetail: nil,
+            ports: [
+                PortEntry(remotePort: Port(3000), process: "next-server", forward: .idle),
+                PortEntry(remotePort: Port(5432), process: "postgres", forward: .idle),
+                PortEntry(remotePort: Port(8080), process: "node", forward: .idle),
+            ]
+        )))
+        model.select(remotePort: 5432)
+
+        model.beginPortFilter()
+        model.appendPortFilter("80")
+
+        #expect(model.portFilter == "80")
+        #expect(model.visiblePorts.map(\.remotePort.value) == [8080])
+        #expect(model.selectedRemotePort == 8080)
+    }
+
+    @Test("typing a filter and pressing escape restores the pre-filter selection")
+    func filteringEscapeRestoresSelection() {
+        let model = AppModel(defaults: makeDefaults())
+        model.apply(.state(PortsState(
+            host: "h",
+            status: .connected,
+            statusDetail: nil,
+            ports: [
+                PortEntry(remotePort: Port(3000), process: "next-server", forward: .idle),
+                PortEntry(remotePort: Port(5432), process: "postgres", forward: .idle),
+                PortEntry(remotePort: Port(8080), process: "node", forward: .idle),
+            ]
+        )))
+        model.select(remotePort: 5432)
+
+        model.beginPortFilter(with: "80")
+        model.cancelPortFilter()
+
+        #expect(model.portFilter == "")
+        #expect(model.isPortFiltering == false)
+        #expect(model.selectedRemotePort == 5432)
+        #expect(model.visiblePorts.map(\.remotePort.value) == [3000, 5432, 8080])
+    }
+
+    @Test("backspace edits the active filter")
+    func filteringBackspaceEditsQuery() {
+        let model = AppModel(defaults: makeDefaults())
+        model.apply(.state(PortsState(
+            host: "h",
+            status: .connected,
+            statusDetail: nil,
+            ports: [
+                PortEntry(remotePort: Port(3000), process: "next-server", forward: .idle),
+                PortEntry(remotePort: Port(8080), process: "node", forward: .idle),
+            ]
+        )))
+
+        model.beginPortFilter(with: "808")
+        model.deletePortFilterCharacter()
+
+        #expect(model.portFilter == "80")
+        #expect(model.visiblePorts.map(\.remotePort.value) == [8080])
+    }
+
+    @Test("typing starts filtering")
+    func typingStartsFiltering() {
+        let model = AppModel(defaults: makeDefaults())
+        model.apply(.state(PortsState(
+            host: "h",
+            status: .connected,
+            statusDetail: nil,
+            ports: [
+                PortEntry(remotePort: Port(3000), process: "next-server", forward: .idle),
+                PortEntry(remotePort: Port(8080), process: "node", forward: .idle),
+            ]
+        )))
+
+        model.appendPortFilter("80")
+
+        #expect(model.isPortFiltering)
+        #expect(model.portFilter == "80")
+        #expect(model.visiblePorts.map(\.remotePort.value) == [8080])
+    }
+
+    @Test("non-numeric typing does not start filtering")
+    func nonNumericTypingDoesNotStartFiltering() {
+        let model = AppModel(defaults: makeDefaults())
+        model.apply(.state(PortsState(
+            host: "h",
+            status: .connected,
+            statusDetail: nil,
+            ports: [
+                PortEntry(remotePort: Port(3000), process: "next-server", forward: .idle),
+                PortEntry(remotePort: Port(8080), process: "node", forward: .idle),
+            ]
+        )))
+
+        model.appendPortFilter("n")
+
+        #expect(!model.isPortFiltering)
+        #expect(model.portFilter == "")
+        #expect(model.visiblePorts.map(\.remotePort.value) == [3000, 8080])
+    }
+
     @Test("repeated forward clicks while pending send one request")
     func repeatedForwardClicksWhilePendingSendOneRequest() async {
         let sender = RecordingSender()
