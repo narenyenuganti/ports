@@ -2,7 +2,11 @@ import AppKit
 import SwiftUI
 
 enum PopoverLayout {
-    static let portListMaxHeight: CGFloat = 680
+    static let portListMaxHeight: CGFloat = 780
+    static let portListSpacing: CGFloat = 5
+    static let portTileHorizontalPadding: CGFloat = 10
+    static let portTileVerticalPadding: CGFloat = 7
+    static let portTileCornerRadius: CGFloat = 7
 }
 
 // MARK: - PopoverView
@@ -63,7 +67,7 @@ public struct PopoverView: View {
                 .padding(.vertical, 12)
         } else {
             ScrollView {
-                VStack(spacing: 6) {
+                VStack(spacing: PopoverLayout.portListSpacing) {
                     ForEach(model.state.ports, id: \.remotePort) { entry in
                         PortTileView(entry: entry)
                     }

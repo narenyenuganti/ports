@@ -3,9 +3,35 @@ import SwiftUI
 
 // MARK: - PortTileView
 //
-// One tile per remote PortEntry: process name, "remote :p -> localhost:p",
-// a status pill, and on-tap actions (Forward/Stop, Open, Copy URL, custom
-// local port). Thin view; intents go through AppModel.
+// One tile per remote PortEntry: compact identity, status pill, and on-tap
+// actions (Forward/Stop, Open, Copy URL, custom local port). Thin view;
+// intents go through AppModel.
+
+struct PortTilePresentation {
+    let primaryLabel: String?
+    let primaryValue: String
+    let detail: String?
+    let portAccessory: String?
+
+    init(entry: PortEntry) {
+        let remotePort = entry.remotePort.value
+        if let process = entry.process, !process.isEmpty {
+            primaryLabel = nil
+            primaryValue = process
+            portAccessory = ":\(remotePort)"
+        } else {
+            primaryLabel = "port"
+            primaryValue = "\(remotePort)"
+            portAccessory = nil
+        }
+
+        if case .forwarding(let localPort) = entry.forward {
+            detail = "localhost:\(localPort.value)"
+        } else {
+            detail = nil
+        }
+    }
+}
 
 struct PortTileView: View {
     @EnvironmentObject var model: AppModel
@@ -27,6 +53,10 @@ struct PortTileView: View {
         model.isPortIntentPending(remotePort: remotePort)
     }
 
+    private var presentation: PortTilePresentation {
+        PortTilePresentation(entry: entry)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Button {
@@ -40,30 +70,41 @@ struct PortTileView: View {
                 actions
             }
         }
-        .padding(8)
-        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
+        .padding(.horizontal, PopoverLayout.portTileHorizontalPadding)
+        .padding(.vertical, PopoverLayout.portTileVerticalPadding)
+        .background(
+            .quaternary.opacity(0.4),
+            in: RoundedRectangle(cornerRadius: PopoverLayout.portTileCornerRadius)
+        )
     }
 
     private var tileHeader: some View {
         HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(entry.process ?? "port \(remotePort)")
-                    .font(.callout.weight(.medium))
-                Text(routeDescription)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    if let label = presentation.primaryLabel {
+                        Text(label)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    Text(presentation.primaryValue)
+                        .font(.callout.weight(.semibold))
+                        .lineLimit(1)
+                    if let accessory = presentation.portAccessory {
+                        portAccessory(accessory)
+                    }
+                }
+                if let detail = presentation.detail {
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
             }
             Spacer()
             statusPill
         }
         .contentShape(Rectangle())
-    }
-
-    private var routeDescription: String {
-        if let local = localPort {
-            return "remote :\(remotePort) -> localhost:\(local)"
-        }
-        return "remote :\(remotePort)"
     }
 
     @ViewBuilder
@@ -86,6 +127,16 @@ struct PortTileView: View {
             .padding(.vertical, 3)
             .background(color.opacity(0.18), in: Capsule())
             .foregroundStyle(color == .secondary ? Color.secondary : color)
+    }
+
+    private func portAccessory(_ text: String) -> some View {
+        Text(text)
+            .font(.caption2.weight(.semibold))
+            .monospacedDigit()
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(.secondary.opacity(0.14), in: Capsule())
+            .foregroundStyle(.secondary)
     }
 
     @ViewBuilder
