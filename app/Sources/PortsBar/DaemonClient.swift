@@ -1,188 +1,172 @@
 import Foundation
 
-// MARK: - NDJSON framing (pure, testable)
+// MARK: - NDJSON framing
+//
+// The daemon speaks NDJSON: one JSON object per line, '\n'-terminated.
+// `NDJSONFramer` accumulates bytes and yields complete lines as decoded
+// DaemonMessage values. Pure value type, fully unit-testable without a socket.
 
-/// Encodes and decodes the newline-delimited JSON wire framing.
-///
-/// Kept free of I/O so the framing rules can be unit-tested directly: a
-/// ``Request`` encodes to a single line terminated by `\n`, and a byte stream
-/// containing one or more concatenated JSON lines decodes back into messages.
-public enum NDJSON {
-    /// JSON-encode a value and append the framing newline.
-    public static func encodeLine<T: Encodable>(_ value: T) throws -> Data {
-        let encoder = JSONEncoder()
-        var data = try encoder.encode(value)
-        data.append(0x0A) // '\n'
+/// Splits a byte stream into newline-delimited JSON messages.
+struct NDJSONFramer: Sendable {
+    private var buffer = Data()
+    private let decoder = JSONDecoder()
+
+    init() {}
+
+    /// Append received bytes and return every complete DaemonMessage now available.
+    /// Incomplete trailing data is retained for the next call.
+    mutating func push(_ chunk: Data) throws -> [DaemonMessage] {
+        buffer.append(chunk)
+        var messages: [DaemonMessage] = []
+        let newline = UInt8(ascii: "\n")
+        while let idx = buffer.firstIndex(of: newline) {
+            let lineRange = buffer.startIndex..<idx
+            let line = buffer.subdata(in: lineRange)
+            // Drop the line plus its newline terminator.
+            buffer.removeSubrange(buffer.startIndex...idx)
+            // Skip blank lines (e.g. trailing newline pairs).
+            let trimmed = line.filter { $0 != UInt8(ascii: "\r") && $0 != UInt8(ascii: " ") }
+            if trimmed.isEmpty { continue }
+            messages.append(try decoder.decode(DaemonMessage.self, from: line))
+        }
+        return messages
+    }
+}
+
+/// Encodes a Request as a single NDJSON line (JSON + trailing '\n').
+enum NDJSONEncoder {
+    private static let encoder: JSONEncoder = {
+        let e = JSONEncoder()
+        e.outputFormatting = [.withoutEscapingSlashes]
+        return e
+    }()
+
+    static func line(_ request: Request) throws -> Data {
+        var data = try encoder.encode(request)
+        data.append(UInt8(ascii: "\n"))
         return data
     }
-
-    /// Encode a ``Request`` into a single NDJSON line.
-    public static func encodeRequest(_ request: Request) throws -> Data {
-        try encodeLine(request)
-    }
 }
 
-/// Buffers incoming bytes and yields complete NDJSON lines as they arrive.
-///
-/// A `Sendable` value type holding only `Data`; the daemon read loop feeds it
-/// chunks and drains decoded ``DaemonMessage`` values. Splitting on `\n`
-/// tolerates partial trailing lines (kept buffered until the next chunk).
-public struct LineFramer: Sendable {
-    private var buffer = Data()
+// MARK: - Binary location
 
-    public init() {}
-
-    /// Append a chunk and return every complete line (without the trailing
-    /// newline) now available. Incomplete trailing data stays buffered.
-    public mutating func push(_ chunk: Data) -> [Data] {
-        buffer.append(chunk)
-        var lines: [Data] = []
-        while let newlineIndex = buffer.firstIndex(of: 0x0A) {
-            let line = buffer[buffer.startIndex..<newlineIndex]
-            if !line.isEmpty {
-                lines.append(Data(line))
-            }
-            // Drop the line and its newline from the buffer.
-            buffer.removeSubrange(buffer.startIndex...newlineIndex)
-        }
-        return lines
-    }
-
-    /// Decode the daemon messages contained in a chunk, skipping blank lines.
-    public mutating func decodeMessages(_ chunk: Data) throws -> [DaemonMessage] {
-        let decoder = JSONDecoder()
-        return try push(chunk).map { try decoder.decode(DaemonMessage.self, from: $0) }
-    }
-}
-
-// MARK: - Binary + socket path resolution
-
-/// Locates the bundled `ports` binary and the daemon socket path.
-public enum DaemonPaths {
-    /// Bundle identifier used for the Application Support subdirectory.
-    public static let bundleID = "ai.polymathlabs.PortsBar"
-
-    /// Path to the `ports` binary, preferring the app bundle's Resources and
-    /// falling back to a dev-built debug binary for `swift run`/tests.
-    public static func portsBinary() -> URL? {
-        if let bundled = Bundle.main.url(forResource: "ports", withExtension: nil) {
-            return bundled
-        }
-        if let resourceURL = Bundle.main.resourceURL {
-            let candidate = resourceURL.appendingPathComponent("ports")
-            if FileManager.default.isExecutableFile(atPath: candidate.path) {
-                return candidate
+enum DaemonBinary {
+    /// Locate the bundled `ports` binary (Contents/Resources/ports) with a dev
+    /// fallback. Per AGENTS.md §8 we only ever spawn a binary under the app
+    /// bundle in production; the dev fallback is for `swift run` workflows.
+    static func locate(
+        bundle: Bundle = .main,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        fileManager: FileManager = .default
+    ) -> URL? {
+        // 1. Bundled resource (production).
+        if let resourceURL = bundle.resourceURL {
+            let bundled = resourceURL.appendingPathComponent("ports")
+            if fileManager.isExecutableFile(atPath: bundled.path) {
+                return bundled
             }
         }
-        // Dev fallback: a cargo debug build next to the worktree root.
-        let fm = FileManager.default
-        for relative in ["target/debug/ports", "../target/debug/ports"] {
-            let candidate = URL(fileURLWithPath: fm.currentDirectoryPath)
-                .appendingPathComponent(relative)
-            if fm.isExecutableFile(atPath: candidate.path) {
+        // 2. Explicit dev override.
+        if let override = environment["PORTS_DAEMON_BIN"],
+           fileManager.isExecutableFile(atPath: override) {
+            return URL(fileURLWithPath: override)
+        }
+        // 3. Dev fallback: a debug/release build next to the running executable.
+        let exeDir = bundle.executableURL?.deletingLastPathComponent()
+        for candidate in [exeDir?.appendingPathComponent("ports")].compactMap({ $0 }) {
+            if fileManager.isExecutableFile(atPath: candidate.path) {
                 return candidate
             }
         }
         return nil
     }
+}
 
-    /// `~/Library/Application Support/<bundle-id>/daemon.sock`.
-    public static func socketPath() -> URL {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? URL(fileURLWithPath: NSHomeDirectory())
-                .appendingPathComponent("Library/Application Support")
-        return base
-            .appendingPathComponent(bundleID, isDirectory: true)
-            .appendingPathComponent("daemon.sock")
+// MARK: - Socket path
+
+enum DaemonSocket {
+    /// Default socket path: $XDG_RUNTIME_DIR/ports.sock or
+    /// ~/Library/Application Support/ports/ports.sock.
+    static func defaultPath(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        fileManager: FileManager = .default
+    ) -> String {
+        if let runtime = environment["XDG_RUNTIME_DIR"], !runtime.isEmpty {
+            return (runtime as NSString).appendingPathComponent("ports.sock")
+        }
+        let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)
+            .first ?? URL(fileURLWithPath: NSHomeDirectory())
+            .appendingPathComponent("Library/Application Support")
+        let dir = appSupport.appendingPathComponent("ports", isDirectory: true)
+        return dir.appendingPathComponent("ports.sock").path
     }
 }
 
-// MARK: - Daemon client
+// MARK: - Errors
 
-/// Errors surfaced by ``DaemonClient``.
-public enum DaemonClientError: Error, Sendable {
+enum DaemonClientError: Error, Sendable {
     case binaryNotFound
-    case socketCreationFailed(errno: Int32)
-    case connectFailed(errno: Int32)
+    case socketCreateFailed(Int32)
+    case socketConnectFailed(Int32)
     case notConnected
-    case writeFailed(errno: Int32)
+    case writeFailed(Int32)
 }
 
-/// A `Sendable`, lock-guarded holder for the read-loop task.
-///
-/// The `AsyncStream` builder closure is `@Sendable` and cannot mutate actor
-/// state, so the task it spawns is parked here; `stop()` cancels through it.
-private final class TaskBox: @unchecked Sendable {
-    private let lock = NSLock()
-    private var task: Task<Void, Never>?
+// MARK: - DaemonClient
+//
+// Spawns and supervises the daemon, connects the Unix socket, and exposes an
+// AsyncStream<DaemonMessage> from the read loop. async/await only; the blocking
+// POSIX read is hopped to a detached task that feeds the stream continuation.
 
-    func store(_ task: Task<Void, Never>) {
-        lock.lock(); defer { lock.unlock() }
-        self.task = task
-    }
-
-    func cancel() {
-        lock.lock(); defer { lock.unlock() }
-        task?.cancel()
-        task = nil
-    }
-}
-
-/// Spawns and supervises the `ports daemon` child process, connects its Unix
-/// socket, and exposes an `AsyncStream` of decoded ``DaemonMessage`` values.
-///
-/// All I/O is async/await; the blocking POSIX `connect`/`read`/`write` calls are
-/// performed off the cooperative pool via `Task.detached` continuations. The
-/// type is an `actor` so its mutable file-descriptor and child-process state is
-/// race-free under Swift 6 strict concurrency.
-public actor DaemonClient {
-    private var fileDescriptor: Int32 = -1
+actor DaemonClient {
+    private let binaryURL: URL
+    private let socketPath: String
     private var process: Process?
-    private let readTask = TaskBox()
+    private var fd: Int32 = -1
+    private var readTask: Task<Void, Never>?
+    private var continuation: AsyncStream<DaemonMessage>.Continuation?
 
-    public init() {}
-
-    /// Spawn `ports daemon --socket <path>` if no live daemon is present, then
-    /// connect the socket. Returns a stream of decoded daemon messages; the
-    /// stream finishes when the connection is torn down or the read loop ends.
-    public func start() throws -> AsyncStream<DaemonMessage> {
-        let socket = DaemonPaths.socketPath()
-        try ensureSocketDirectory(socket)
-
-        // Try connecting to an existing daemon first; spawn if that fails.
-        if (try? connectSocket(at: socket)) == nil {
-            try spawnDaemon(socketPath: socket)
-            try connectWithRetry(at: socket)
-        }
-
-        let fd = fileDescriptor
-        let box = readTask
-        // The builder closure runs synchronously and receives a fresh `Sendable`
-        // continuation. The detached read loop owns it and finishes the stream on
-        // EOF/cancellation; the spawned task is parked in the `TaskBox` so
-        // `stop()` can cancel it. `stop()` also closes the fd, unblocking read(2).
-        return AsyncStream<DaemonMessage>(bufferingPolicy: .unbounded) { continuation in
-            let task = Task.detached {
-                await daemonReadLoop(fd: fd, continuation: continuation)
-            }
-            box.store(task)
-            continuation.onTermination = { _ in task.cancel() }
-        }
+    init(binaryURL: URL, socketPath: String) {
+        self.binaryURL = binaryURL
+        self.socketPath = socketPath
     }
 
-    /// Encode and send a request as a single NDJSON line.
-    public func send(_ request: Request) throws {
-        guard fileDescriptor >= 0 else { throw DaemonClientError.notConnected }
-        let data = try NDJSON.encodeRequest(request)
-        try Self.writeAll(fd: fileDescriptor, data: data)
+    /// Convenience initializer that locates the bundled binary and default socket.
+    init() throws {
+        guard let url = DaemonBinary.locate() else {
+            throw DaemonClientError.binaryNotFound
+        }
+        self.binaryURL = url
+        self.socketPath = DaemonSocket.defaultPath()
     }
 
-    /// Tear down the read loop, close the socket, and terminate the child.
-    public func stop() {
-        readTask.cancel()
-        if fileDescriptor >= 0 {
-            close(fileDescriptor)
-            fileDescriptor = -1
+    /// Spawn the daemon process if a socket isn't already live, connect to it,
+    /// and start the read loop. Returns the message stream.
+    func start() async throws -> AsyncStream<DaemonMessage> {
+        if !socketIsLive() {
+            try spawnDaemon()
+        }
+        try await connectSocket()
+        return makeStream()
+    }
+
+    /// Send a request as an NDJSON line.
+    func send(_ request: Request) throws {
+        guard fd >= 0 else { throw DaemonClientError.notConnected }
+        let data = try NDJSONEncoder.line(request)
+        try writeAll(data)
+    }
+
+    /// Tear down: cancel the read loop, close the socket, terminate the daemon
+    /// we spawned.
+    func stop() {
+        readTask?.cancel()
+        readTask = nil
+        continuation?.finish()
+        continuation = nil
+        if fd >= 0 {
+            close(fd)
+            fd = -1
         }
         if let process, process.isRunning {
             process.terminate()
@@ -190,128 +174,100 @@ public actor DaemonClient {
         process = nil
     }
 
-    // MARK: Private helpers
+    // MARK: - Internals
 
-    private func ensureSocketDirectory(_ socket: URL) throws {
-        let dir = socket.deletingLastPathComponent()
-        try FileManager.default.createDirectory(
-            at: dir,
-            withIntermediateDirectories: true,
-            attributes: [.posixPermissions: 0o700]
-        )
-    }
-
-    private func spawnDaemon(socketPath: URL) throws {
-        guard let binary = DaemonPaths.portsBinary() else {
-            throw DaemonClientError.binaryNotFound
-        }
+    private func spawnDaemon() throws {
         let proc = Process()
-        proc.executableURL = binary
-        proc.arguments = ["daemon", "--socket", socketPath.path]
+        proc.executableURL = binaryURL
+        proc.arguments = ["daemon", "--socket", socketPath]
         try proc.run()
         process = proc
     }
 
-    private func connectWithRetry(at socket: URL, attempts: Int = 50) throws {
-        var lastError: Error = DaemonClientError.connectFailed(errno: 0)
-        for _ in 0..<attempts {
-            do {
-                try connectSocket(at: socket)
-                return
-            } catch {
-                lastError = error
-                // Brief async backoff while the daemon creates its socket.
-                usleepShim(20_000)
-            }
-        }
-        throw lastError
+    private func socketIsLive() -> Bool {
+        FileManager.default.fileExists(atPath: socketPath)
     }
 
-    /// Open a `AF_UNIX`/`SOCK_STREAM` socket and connect to `socket`.
-    @discardableResult
-    private func connectSocket(at socket: URL) throws -> Int32 {
-        let fd = Foundation.socket(AF_UNIX, SOCK_STREAM, 0)
-        guard fd >= 0 else { throw DaemonClientError.socketCreationFailed(errno: errno) }
+    private func connectSocket() async throws {
+        // Retry briefly while the freshly spawned daemon creates the socket.
+        var lastErrno: Int32 = 0
+        for attempt in 0..<50 {
+            if let connected = try? attemptConnect() {
+                fd = connected
+                return
+            }
+            lastErrno = errno
+            // Back off ~20ms between attempts using a non-blocking async sleep.
+            if attempt < 49 {
+                try? await Task.sleep(nanoseconds: 20_000_000)
+            }
+        }
+        throw DaemonClientError.socketConnectFailed(lastErrno)
+    }
+
+    private func attemptConnect() throws -> Int32 {
+        let sock = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard sock >= 0 else { throw DaemonClientError.socketCreateFailed(errno) }
 
         var addr = sockaddr_un()
         addr.sun_family = sa_family_t(AF_UNIX)
-        let path = socket.path
-        let maxLen = MemoryLayout.size(ofValue: addr.sun_path) - 1
-        guard path.utf8.count <= maxLen else {
-            close(fd)
-            throw DaemonClientError.connectFailed(errno: ENAMETOOLONG)
-        }
-        withUnsafeMutablePointer(to: &addr.sun_path) { ptr in
-            path.withCString { src in
-                ptr.withMemoryRebound(to: CChar.self, capacity: maxLen + 1) { dst in
-                    _ = strcpy(dst, src)
-                }
+        let pathBytes = socketPath.utf8CString
+        precondition(
+            pathBytes.count <= MemoryLayout.size(ofValue: addr.sun_path),
+            "socket path too long"
+        )
+        withUnsafeMutablePointer(to: &addr.sun_path) { dst in
+            dst.withMemoryRebound(to: CChar.self, capacity: pathBytes.count) { ptr in
+                for (i, b) in pathBytes.enumerated() { ptr[i] = b }
             }
         }
-
-        let connectResult = withUnsafePointer(to: &addr) { ptr in
-            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockPtr in
-                Foundation.connect(fd, sockPtr, socklen_t(MemoryLayout<sockaddr_un>.size))
+        let len = socklen_t(MemoryLayout<sockaddr_un>.size)
+        let result = withUnsafePointer(to: &addr) { raw -> Int32 in
+            raw.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
+                Foundation.connect(sock, sa, len)
             }
         }
-        guard connectResult == 0 else {
-            let err = errno
-            close(fd)
-            throw DaemonClientError.connectFailed(errno: err)
+        if result != 0 {
+            let e = errno
+            close(sock)
+            throw DaemonClientError.socketConnectFailed(e)
         }
-        fileDescriptor = fd
-        return fd
+        return sock
     }
 
-    // MARK: Static I/O (run off-actor in detached tasks)
+    private func makeStream() -> AsyncStream<DaemonMessage> {
+        let socketFD = fd
+        let (stream, cont) = AsyncStream<DaemonMessage>.makeStream()
+        continuation = cont
+        readTask = Task.detached {
+            var framer = NDJSONFramer()
+            let bufSize = 64 * 1024
+            var buf = [UInt8](repeating: 0, count: bufSize)
+            while !Task.isCancelled {
+                let n = buf.withUnsafeMutableBytes { ptr -> Int in
+                    read(socketFD, ptr.baseAddress, bufSize)
+                }
+                if n <= 0 { break } // EOF or error.
+                let chunk = Data(buf[0..<n])
+                if let messages = try? framer.push(chunk) {
+                    for msg in messages { cont.yield(msg) }
+                }
+            }
+            cont.finish()
+        }
+        return stream
+    }
 
-    private static func writeAll(fd: Int32, data: Data) throws {
+    private func writeAll(_ data: Data) throws {
         try data.withUnsafeBytes { raw in
-            guard let base = raw.baseAddress else { return }
             var offset = 0
+            let base = raw.baseAddress!
             let total = raw.count
             while offset < total {
-                let written = write(fd, base.advanced(by: offset), total - offset)
-                if written <= 0 {
-                    throw DaemonClientError.writeFailed(errno: errno)
-                }
-                offset += written
+                let n = write(fd, base + offset, total - offset)
+                if n <= 0 { throw DaemonClientError.writeFailed(errno) }
+                offset += n
             }
         }
     }
-}
-
-/// Minimal sleep used during connect retry while the daemon comes up. Wraps the
-/// POSIX `usleep` so the actor's retry loop does not need a `Task.sleep` import
-/// dance; it is only invoked during initial connection, never in steady state.
-private func usleepShim(_ microseconds: UInt32) {
-    usleep(microseconds)
-}
-
-/// The daemon read loop: blocking `read(2)` into a buffer, NDJSON-framed, with
-/// each decoded ``DaemonMessage`` yielded to `continuation`. Runs in a detached
-/// task off the actor; finishes the stream on EOF, error, or cancellation.
-///
-/// `continuation` is `Sendable`, so this free function carries no actor-isolated
-/// state and is safe under Swift 6 strict concurrency.
-private func daemonReadLoop(
-    fd: Int32,
-    continuation: AsyncStream<DaemonMessage>.Continuation
-) async {
-    var framer = LineFramer()
-    let bufferSize = 16 * 1024
-    var buffer = [UInt8](repeating: 0, count: bufferSize)
-    while !Task.isCancelled {
-        let n = buffer.withUnsafeMutableBytes { ptr -> Int in
-            read(fd, ptr.baseAddress, bufferSize)
-        }
-        if n <= 0 { break } // EOF or error.
-        let chunk = Data(buffer[0..<n])
-        if let messages = try? framer.decodeMessages(chunk) {
-            for message in messages {
-                continuation.yield(message)
-            }
-        }
-    }
-    continuation.finish()
 }
