@@ -74,7 +74,10 @@ pub async fn is_daemon_alive(socket: &Path) -> bool {
             }
         }
     };
-    matches!(tokio::time::timeout(PING_TIMEOUT, attempt).await, Ok(Some(())))
+    matches!(
+        tokio::time::timeout(PING_TIMEOUT, attempt).await,
+        Ok(Some(()))
+    )
 }
 
 /// Outcome of the single-instance check.

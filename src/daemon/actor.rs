@@ -258,7 +258,10 @@ impl Actor {
 
     /// Whether auto-reconnect is enabled in the active config.
     fn auto_reconnect(&self) -> bool {
-        self.config.as_ref().map(|c| c.auto_reconnect).unwrap_or(false)
+        self.config
+            .as_ref()
+            .map(|c| c.auto_reconnect)
+            .unwrap_or(false)
     }
 
     /// Handle a single request body, returning the reply payload.
@@ -523,8 +526,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread", start_paused = true)]
     async fn set_config_stores_host_without_connecting() {
-        let (tx, mut state, cancel, handle) =
-            spawn_actor(MockEngine::with_ports(vec![]));
+        let (tx, mut state, cancel, handle) = spawn_actor(MockEngine::with_ports(vec![]));
         send(&tx, set_config("myhost", false)).await.unwrap();
         state.changed().await.unwrap();
         let snap = state.borrow().clone();
@@ -537,12 +539,9 @@ mod tests {
     #[tokio::test(flavor = "current_thread", start_paused = true)]
     async fn connect_unknown_host_errors() {
         let (tx, _state, cancel, handle) = spawn_actor(MockEngine::with_ports(vec![]));
-        send(
-            &tx,
-            set_config("definitely-not-a-real-host-xyz-123", false),
-        )
-        .await
-        .unwrap();
+        send(&tx, set_config("definitely-not-a-real-host-xyz-123", false))
+            .await
+            .unwrap();
         let res = send(&tx, RequestBody::Connect).await;
         assert!(matches!(res, Err(ProtocolError::UnknownHost { .. })));
         cancel.cancel();

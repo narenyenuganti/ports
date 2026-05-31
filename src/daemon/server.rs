@@ -52,11 +52,7 @@ pub fn bind(path: &Path) -> Result<UnixListener> {
 ///
 /// Each accepted connection is served by [`serve_connection`] on its own task
 /// with a child cancellation token.
-pub async fn accept_loop(
-    listener: UnixListener,
-    actor: ActorHandle,
-    cancel: CancellationToken,
-) {
+pub async fn accept_loop(listener: UnixListener, actor: ActorHandle, cancel: CancellationToken) {
     loop {
         tokio::select! {
             _ = cancel.cancelled() => break,
