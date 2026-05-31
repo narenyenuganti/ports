@@ -2,7 +2,8 @@ import AppKit
 import SwiftUI
 
 enum PopoverLayout {
-    static let portListMaxHeight: CGFloat = 780
+    static let width: CGFloat = 420
+    static let portListMaxHeight: CGFloat = 920
     static let portListSpacing: CGFloat = 5
     static let portTileHorizontalPadding: CGFloat = 10
     static let portTileVerticalPadding: CGFloat = 7
@@ -46,7 +47,7 @@ public struct PopoverView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
         }
-        .frame(width: 340)
+        .frame(width: PopoverLayout.width)
     }
 
     @ViewBuilder

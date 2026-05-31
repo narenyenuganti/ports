@@ -60,7 +60,7 @@ struct PortTileView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Button {
-                expanded.toggle()
+                handleHeaderTap()
             } label: {
                 tileHeader
             }
@@ -76,6 +76,11 @@ struct PortTileView: View {
             .quaternary.opacity(0.4),
             in: RoundedRectangle(cornerRadius: PopoverLayout.portTileCornerRadius)
         )
+        .onChange(of: localPort) { _, newValue in
+            if let newValue {
+                customLocalPort = "\(newValue)"
+            }
+        }
     }
 
     private var tileHeader: some View {
@@ -109,14 +114,18 @@ struct PortTileView: View {
 
     @ViewBuilder
     private var statusPill: some View {
-        switch entry.forward {
-        case .forwarding:
-            pill("Forwarding", .green)
-        case .idle:
-            pill("Idle", .secondary)
-        case .error(let detail):
-            pill("Error", .red)
-                .help(detail)
+        if isPending {
+            pill(isForwarding ? "Updating" : "Forwarding", isForwarding ? .yellow : .green)
+        } else {
+            switch entry.forward {
+            case .forwarding:
+                pill("Forwarding", .green)
+            case .idle:
+                pill("Idle", .secondary)
+            case .error(let detail):
+                pill("Error", .red)
+                    .help(detail)
+            }
         }
     }
 
@@ -142,8 +151,27 @@ struct PortTileView: View {
     @ViewBuilder
     private var actions: some View {
         HStack(spacing: 8) {
+            Text("localhost")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            TextField(localPort.map(String.init) ?? "auto", text: $customLocalPort)
+                .textFieldStyle(.roundedBorder)
+                .monospacedDigit()
+                .frame(width: 90)
+            Button("Apply") {
+                if let p = UInt16(customLocalPort) {
+                    Task { await model.setLocalPort(remotePort: remotePort, localPort: p) }
+                }
+            }
+            .controlSize(.small)
+            .disabled(isPending || UInt16(customLocalPort) == nil || UInt16(customLocalPort) == localPort)
+            Spacer()
+        }
+        .disabled(isPending)
+
+        HStack(spacing: 8) {
             if isForwarding {
-                Button(isPending ? "Stopping..." : "Stop") {
+                Button("Stop") {
                     Task { await model.stop(remotePort: remotePort) }
                 }
                 .disabled(isPending)
@@ -157,31 +185,11 @@ struct PortTileView: View {
                 } label: {
                     Label("Copy URL", systemImage: "doc.on.doc")
                 }
-            } else {
-                Button(isPending ? "Forwarding..." : "Forward") {
-                    Task { await model.forward(remotePort: remotePort) }
-                }
-                .disabled(isPending)
             }
             Spacer()
         }
         .buttonStyle(.bordered)
         .controlSize(.small)
-
-        HStack(spacing: 6) {
-            TextField("local port", text: $customLocalPort)
-                .textFieldStyle(.roundedBorder)
-                .frame(width: 90)
-            Button("Set") {
-                if let p = UInt16(customLocalPort) {
-                    Task { await model.setLocalPort(remotePort: remotePort, localPort: p) }
-                    customLocalPort = ""
-                }
-            }
-            .controlSize(.small)
-            .disabled(isPending || UInt16(customLocalPort) == nil)
-        }
-        .disabled(isPending)
     }
 
     // App-side actions (no daemon round-trip), using the bound local port.
@@ -196,5 +204,16 @@ struct PortTileView: View {
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.setString("http://localhost:\(local)", forType: .string)
+    }
+
+    private func handleHeaderTap() {
+        if let localPort {
+            customLocalPort = "\(localPort)"
+            expanded.toggle()
+            return
+        }
+
+        expanded = true
+        Task { await model.activate(remotePort: remotePort) }
     }
 }

@@ -251,6 +251,11 @@ public final class AppModel: ObservableObject {
         ), pendingRemotePort: remotePort)
     }
 
+    func activate(remotePort: UInt16) async {
+        guard localPort(forRemote: remotePort) == nil else { return }
+        await forward(remotePort: remotePort)
+    }
+
     func stop(remotePort: UInt16) async {
         guard beginPortIntent(.stop, remotePort: remotePort) else { return }
         await send(.stopForward(remotePort: Port(remotePort)), pendingRemotePort: remotePort)

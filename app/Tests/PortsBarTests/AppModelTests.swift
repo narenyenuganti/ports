@@ -259,6 +259,46 @@ struct AppModelIntentTests {
         #expect(lp == nil)
     }
 
+    @Test("activating an idle port starts forwarding it")
+    func activateIdlePortStartsForwarding() async {
+        let sender = RecordingSender()
+        let model = AppModel(defaults: makeDefaults(), sender: sender)
+        model.apply(.state(PortsState(
+            host: "h",
+            status: .connected,
+            statusDetail: nil,
+            ports: [PortEntry(remotePort: Port(3000), forward: .idle)]
+        )))
+
+        await model.activate(remotePort: 3000)
+
+        let requests = await sender.log.requests
+        #expect(requests.count == 1)
+        guard case .startForward(let remotePort, let localPort) = requests[0].body else {
+            Issue.record("expected start_forward")
+            return
+        }
+        #expect(remotePort == Port(3000))
+        #expect(localPort == nil)
+    }
+
+    @Test("activating an already-forwarding port does not send another start")
+    func activateForwardingPortDoesNotRestart() async {
+        let sender = RecordingSender()
+        let model = AppModel(defaults: makeDefaults(), sender: sender)
+        model.apply(.state(PortsState(
+            host: "h",
+            status: .connected,
+            statusDetail: nil,
+            ports: [PortEntry(remotePort: Port(3000), forward: .forwarding(localPort: Port(13000)))]
+        )))
+
+        await model.activate(remotePort: 3000)
+
+        let requests = await sender.log.requests
+        #expect(requests.isEmpty)
+    }
+
     @Test("repeated forward clicks while pending send one request")
     func repeatedForwardClicksWhilePendingSendOneRequest() async {
         let sender = RecordingSender()

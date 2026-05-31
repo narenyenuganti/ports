@@ -5,7 +5,8 @@ import Testing
 struct PopoverLayoutTests {
     @Test("port list allows a taller dropdown before scrolling")
     func portListMaxHeight() {
-        #expect(PopoverLayout.portListMaxHeight == 780)
+        #expect(PopoverLayout.width == 420)
+        #expect(PopoverLayout.portListMaxHeight == 920)
     }
 
     @Test("port tiles use compact spacing")
