@@ -108,7 +108,6 @@ public struct SettingsView: View {
             model.prefs.launchAtLogin = LaunchAtLogin.isEnabled
         } catch {
             launchError = "Could not update login item: \(error.localizedDescription)"
-            // Reflect the real status back into the toggle.
             launchAtLogin = LaunchAtLogin.isEnabled
         }
     }

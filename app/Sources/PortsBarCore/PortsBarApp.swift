@@ -1,19 +1,21 @@
 import SwiftUI
 
-// MARK: - App entry point
+// MARK: - App scene
+//
+// The SwiftUI App lives in the library so the logic is testable; the thin
+// PortsBar executable target (main.swift) calls PortsBarApp.main().
 
-@main
-struct PortsBarApp: App {
+public struct PortsBarApp: App {
     @StateObject private var model = AppModel()
     @StateObject private var coordinator: AppCoordinator
 
-    init() {
+    public init() {
         let model = AppModel()
         _model = StateObject(wrappedValue: model)
         _coordinator = StateObject(wrappedValue: AppCoordinator(model: model))
     }
 
-    var body: some Scene {
+    public var body: some Scene {
         MenuBarExtra {
             PopoverView()
                 .environmentObject(model)
@@ -38,8 +40,7 @@ struct MenuBarLabel: View {
         Image(systemName: "arrow.left.arrow.right")
             .symbolRenderingMode(.hierarchical)
             .foregroundStyle(tint)
-            .opacity(model.state.connStatus == .disconnected ? 0.5 : 1.0)
-            // Badge: rendered as a label suffix; MenuBarExtra shows text labels.
+            .opacity(model.state.status == .disconnected ? 0.5 : 1.0)
             .accessibilityLabel("Ports: \(count) active")
         if count > 0 {
             Text("\(count)")
@@ -47,7 +48,7 @@ struct MenuBarLabel: View {
     }
 
     private var tint: Color {
-        switch model.state.connStatus {
+        switch model.state.status {
         case .connected: return .primary
         case .connecting: return .secondary
         case .disconnected: return .secondary

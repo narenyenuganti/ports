@@ -16,22 +16,22 @@ extension DaemonClient: RequestSending {}
 //
 // Transient user-facing message (Ack errors, file-transfer results, etc.).
 
-struct Toast: Identifiable, Equatable, Sendable {
-    let id = UUID()
-    var message: String
-    var isError: Bool
+public struct Toast: Identifiable, Equatable, Sendable {
+    public let id = UUID()
+    public var message: String
+    public var isError: Bool
 }
 
 // MARK: - Preferences
 //
 // Persisted to UserDefaults; the daemon-relevant subset is pushed via SetConfig.
 
-struct Preferences: Equatable, Sendable {
-    var host: String = ""
-    var autoReconnect: Bool = true
-    var autoRefreshSecs: UInt64 = 0
-    var openBrowserOnForward: Bool = false
-    var launchAtLogin: Bool = false
+public struct Preferences: Equatable, Sendable {
+    public var host: String = ""
+    public var autoReconnect: Bool = true
+    public var autoRefreshSecs: UInt64 = 0
+    public var openBrowserOnForward: Bool = false
+    public var launchAtLogin: Bool = false
 
     private enum Keys {
         static let host = "host"
@@ -65,21 +65,21 @@ struct Preferences: Equatable, Sendable {
 // MARK: - AppModel
 
 @MainActor
-final class AppModel: ObservableObject {
+public final class AppModel: ObservableObject {
     /// Latest daemon state. Defaults to disconnected/empty.
-    @Published var state = PortsState(host: nil, status: .disconnected, statusDetail: nil, ports: [])
+    @Published public var state = PortsState(host: nil, status: .disconnected, statusDetail: nil, ports: [])
     /// Persisted preferences.
-    @Published var prefs: Preferences
+    @Published public var prefs: Preferences
     /// Available SSH hosts (from ListHosts Ack).
-    @Published var hosts: [String] = []
+    @Published public var hosts: [String] = []
     /// Active toast, if any.
-    @Published var toast: Toast?
+    @Published public var toast: Toast?
 
     private let defaults: UserDefaults
     private var sender: (any RequestSending)?
     private var nextRequestId: UInt64 = 1
 
-    init(defaults: UserDefaults = .standard, sender: (any RequestSending)? = nil) {
+    public init(defaults: UserDefaults = .standard, sender: (any RequestSending)? = nil) {
         self.defaults = defaults
         self.sender = sender
         self.prefs = Preferences.load(from: defaults)
@@ -93,7 +93,7 @@ final class AppModel: ObservableObject {
     // MARK: Derived state
 
     /// Number of ports currently in the `.forwarding` state (menu-bar badge).
-    var activeForwardCount: Int {
+    public var activeForwardCount: Int {
         state.ports.filter {
             if case .forwarding = $0.forward { return true }
             return false
