@@ -18,6 +18,13 @@ else
   echo "    (skipped: app/Package.swift not present yet)"
 fi
 
+echo "==> Stage 1c: app smoke test (advisory)"
+if [ -d "$REPO_ROOT/build/Ports.app" ]; then
+  "$SCRIPT_DIR/smoke-app.sh"
+else
+  echo "    (skipped: build/Ports.app not present; run 'make app' to package)"
+fi
+
 echo "==> Stage 2: thermo-nuclear-review (explicit, manual)"
 echo "    Invoke the 'thermo-nuclear-review' skill on this branch's diff."
 echo "    It COMPOSES WITH the superpowers review skills; do not skip."
