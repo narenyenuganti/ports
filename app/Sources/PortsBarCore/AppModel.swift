@@ -14,7 +14,7 @@ extension DaemonClient: RequestSending {}
 
 // MARK: - Toast
 //
-// Transient user-facing message (Ack errors, file-transfer completion, etc.).
+// Transient user-facing message (Ack errors, file-transfer results, etc.).
 
 struct Toast: Identifiable, Equatable, Sendable {
     let id = UUID()
@@ -24,50 +24,41 @@ struct Toast: Identifiable, Equatable, Sendable {
 
 // MARK: - Preferences
 //
-// Mirrors the daemon-relevant config plus app-only toggles. Persisted to
-// UserDefaults; pushed to the daemon as DaemonConfig via SetConfig.
+// Persisted to UserDefaults; the daemon-relevant subset is pushed via SetConfig.
 
 struct Preferences: Equatable, Sendable {
+    var host: String = ""
     var autoReconnect: Bool = true
     var autoRefreshSecs: UInt64 = 0
     var openBrowserOnForward: Bool = false
     var launchAtLogin: Bool = false
-    var lastHost: String = ""
-
-    var daemonConfig: DaemonConfig {
-        DaemonConfig(
-            autoReconnect: autoReconnect,
-            autoRefreshSecs: autoRefreshSecs,
-            openBrowserOnForward: openBrowserOnForward
-        )
-    }
 
     private enum Keys {
+        static let host = "host"
         static let autoReconnect = "autoReconnect"
         static let autoRefreshSecs = "autoRefreshSecs"
         static let openBrowserOnForward = "openBrowserOnForward"
         static let launchAtLogin = "launchAtLogin"
-        static let lastHost = "lastHost"
     }
 
     static func load(from defaults: UserDefaults) -> Preferences {
         var p = Preferences()
+        p.host = defaults.string(forKey: Keys.host) ?? ""
         if defaults.object(forKey: Keys.autoReconnect) != nil {
             p.autoReconnect = defaults.bool(forKey: Keys.autoReconnect)
         }
         p.autoRefreshSecs = UInt64(max(0, defaults.integer(forKey: Keys.autoRefreshSecs)))
         p.openBrowserOnForward = defaults.bool(forKey: Keys.openBrowserOnForward)
         p.launchAtLogin = defaults.bool(forKey: Keys.launchAtLogin)
-        p.lastHost = defaults.string(forKey: Keys.lastHost) ?? ""
         return p
     }
 
     func save(to defaults: UserDefaults) {
+        defaults.set(host, forKey: Keys.host)
         defaults.set(autoReconnect, forKey: Keys.autoReconnect)
         defaults.set(Int(autoRefreshSecs), forKey: Keys.autoRefreshSecs)
         defaults.set(openBrowserOnForward, forKey: Keys.openBrowserOnForward)
         defaults.set(launchAtLogin, forKey: Keys.launchAtLogin)
-        defaults.set(lastHost, forKey: Keys.lastHost)
     }
 }
 
@@ -76,11 +67,11 @@ struct Preferences: Equatable, Sendable {
 @MainActor
 final class AppModel: ObservableObject {
     /// Latest daemon state. Defaults to disconnected/empty.
-    @Published var state = StateSnapshot(host: nil, connStatus: .disconnected, forwards: [])
+    @Published var state = StateSnapshot(host: nil, status: .disconnected, statusDetail: nil, ports: [])
     /// Persisted preferences.
     @Published var prefs: Preferences
     /// Available SSH hosts (from ListHosts Ack).
-    @Published var hosts: [HostAlias] = []
+    @Published var hosts: [String] = []
     /// Active toast, if any.
     @Published var toast: Toast?
 
@@ -101,15 +92,23 @@ final class AppModel: ObservableObject {
 
     // MARK: Derived state
 
-    /// Number of forwards currently in the `.forwarding` state.
+    /// Number of ports currently in the `.forwarding` state (menu-bar badge).
     var activeForwardCount: Int {
-        state.forwards.filter {
-            if case .forwarding = $0.status { return true }
+        state.ports.filter {
+            if case .forwarding = $0.forward { return true }
             return false
         }.count
     }
 
-    var isConnected: Bool { state.connStatus == .connected }
+    var isConnected: Bool { state.status == .connected }
+
+    /// The local port a remote port is currently forwarded to, if forwarding.
+    func localPort(forRemote remotePort: UInt16) -> UInt16? {
+        for entry in state.ports where entry.remotePort.value == remotePort {
+            if case .forwarding(let local) = entry.forward { return local.value }
+        }
+        return nil
+    }
 
     // MARK: Applying daemon messages
 
@@ -132,25 +131,8 @@ final class AppModel: ObservableObject {
 
     private func apply(_ event: DaemonEvent) {
         switch event {
-        case .connStatusChanged(let connStatus):
-            state.connStatus = connStatus
-        case .forwardAdded(let forward):
-            if let idx = state.forwards.firstIndex(where: { $0.id == forward.id }) {
-                state.forwards[idx] = forward
-            } else {
-                state.forwards.append(forward)
-            }
-        case .forwardRemoved(let forwardId):
-            state.forwards.removeAll { $0.id == forwardId }
-        case .fileTransfer(let localPath, _, _, let done):
-            if done {
-                let name = (localPath as NSString).lastPathComponent
-                showToast("Sent \(name)", isError: false)
-            }
-        case .log(let level, let message):
-            if level == "error" {
-                showToast(message, isError: true)
-            }
+        case .fileTransfer(let ok, let detail):
+            showToast(detail, isError: !ok)
         }
     }
 
@@ -166,10 +148,12 @@ final class AppModel: ObservableObject {
 
     // MARK: Intents
 
+    /// Persist the chosen host, push it as config, and connect.
     func setHost(_ alias: String) async {
-        prefs.lastHost = alias
+        prefs.host = alias
         prefs.save(to: defaults)
-        await send(.connect(host: HostAlias(alias)))
+        await pushConfig()
+        await send(.connect)
     }
 
     func forward(remotePort: UInt16, localPort: UInt16? = nil) async {
@@ -183,7 +167,7 @@ final class AppModel: ObservableObject {
         await send(.stopForward(remotePort: Port(remotePort)))
     }
 
-    /// Convenience: re-forward an existing entry at a specific local port.
+    /// Re-forward a remote port pinned to a specific local port.
     func setLocalPort(remotePort: UInt16, localPort: UInt16) async {
         await send(.startForward(remotePort: Port(remotePort), localPort: Port(localPort)))
     }
@@ -193,15 +177,27 @@ final class AppModel: ObservableObject {
     }
 
     func refresh() async {
+        await send(.refresh)
+    }
+
+    func listHosts() async {
         await send(.listHosts)
     }
 
     func pushConfig() async {
-        await send(.setConfig(config: prefs.daemonConfig))
+        await send(.setConfig(
+            hostAlias: prefs.host,
+            refreshSecs: prefs.autoRefreshSecs,
+            autoReconnect: prefs.autoReconnect
+        ))
     }
 
     func disconnect() async {
         await send(.disconnect)
+    }
+
+    func shutdown() async {
+        await send(.shutdown)
     }
 
     // MARK: Sending
@@ -224,16 +220,12 @@ extension ProtocolError {
     /// Short human-readable description for toasts.
     var userMessage: String {
         switch self {
-        case .hostNotFound(let alias): return "Host not found: \(alias)"
-        case .connectionFailed(let reason): return "Connection failed: \(reason)"
-        case .ssh(let message): return "SSH error: \(message)"
-        case .bindFailed(let port, let reason): return "Bind failed on \(port): \(reason)"
-        case .forwardNotFound(let id): return "Forward not found: \(id)"
         case .notConnected: return "Not connected"
-        case .invalidRequest(let reason): return "Invalid request: \(reason)"
-        case .io(let message): return "I/O error: \(message)"
-        case .timeout: return "Timed out"
-        case .internal(let message): return "Internal error: \(message)"
+        case .connectFailed(let detail): return "Connect failed: \(detail)"
+        case .bindFailed(let port, let detail): return "Bind failed on \(port.value): \(detail)"
+        case .unknownHost(let alias): return "Unknown host: \(alias)"
+        case .sendFileFailed(let detail): return "Send file failed: \(detail)"
+        case .badRequest(let detail): return "Bad request: \(detail)"
         }
     }
 }

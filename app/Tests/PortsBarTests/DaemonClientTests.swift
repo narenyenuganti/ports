@@ -1,26 +1,22 @@
 import Foundation
 import Testing
-@testable import PortsBar
+@testable import PortsBarCore
 
 @Suite("NDJSON framing")
 struct NDJSONFramingTests {
     @Test("encoder appends trailing newline and round-trips")
     func encoderRoundTrip() throws {
-        let req = Request(id: 42, body: .connect(host: HostAlias("dev-desktop")))
+        let req = Request(id: 42, body: .ping)
         let data = try NDJSONEncoder.line(req)
         #expect(data.last == UInt8(ascii: "\n"))
-
-        // Strip the newline and decode back.
-        let jsonData = data.dropLast()
-        let decoded = try JSONDecoder().decode(Request.self, from: jsonData)
+        let decoded = try JSONDecoder().decode(Request.self, from: data.dropLast())
         #expect(decoded == req)
     }
 
     @Test("encoder does not escape slashes in paths")
     func encoderNoSlashEscaping() throws {
-        let req = Request(id: 1, body: .sendFile(localPath: "/tmp/data.bin", remotePath: "/home/user"))
-        let data = try NDJSONEncoder.line(req)
-        let str = String(decoding: data, as: UTF8.self)
+        let req = Request(id: 1, body: .sendFile(localPath: "/tmp/data.bin", remotePath: "/srv/data.bin"))
+        let str = String(decoding: try NDJSONEncoder.line(req), as: UTF8.self)
         #expect(str.contains("/tmp/data.bin"))
         #expect(!str.contains("\\/"))
     }
@@ -28,24 +24,24 @@ struct NDJSONFramingTests {
     @Test("framer yields two messages from two concatenated lines")
     func framerTwoLines() throws {
         var framer = NDJSONFramer()
-        let line1 = #"{"type":"event","event":"forward_removed","forward_id":1}"#
-        let line2 = #"{"type":"ack","id":3}"#
+        let line1 = #"{"type":"ack","id":7}"#
+        let line2 = #"{"type":"event","event":"file_transfer","ok":true,"detail":"done"}"#
         let combined = Data("\(line1)\n\(line2)\n".utf8)
 
         let messages = try framer.push(combined)
         #expect(messages.count == 2)
 
-        guard case .event(.forwardRemoved(let fid)) = messages[0] else {
-            Issue.record("expected forward_removed first")
+        guard case .ack(let id, _, _) = messages[0] else {
+            Issue.record("expected ack first")
             return
         }
-        #expect(fid == ForwardId(1))
+        #expect(id == 7)
 
-        guard case .ack(let id, _, _) = messages[1] else {
-            Issue.record("expected ack second")
+        guard case .event(.fileTransfer(let ok, _)) = messages[1] else {
+            Issue.record("expected file_transfer event second")
             return
         }
-        #expect(id == 3)
+        #expect(ok == true)
     }
 
     @Test("framer buffers a partial line until completed")
@@ -55,8 +51,7 @@ struct NDJSONFramingTests {
         let head = Data(full.prefix(10).utf8)
         let tail = Data((full.dropFirst(10) + "\n").utf8)
 
-        let first = try framer.push(head)
-        #expect(first.isEmpty)
+        #expect(try framer.push(head).isEmpty)
 
         let second = try framer.push(tail)
         #expect(second.count == 1)
@@ -71,15 +66,13 @@ struct NDJSONFramingTests {
     func framerBlankLines() throws {
         var framer = NDJSONFramer()
         let combined = Data("\n{\"type\":\"ack\",\"id\":1}\n\n".utf8)
-        let messages = try framer.push(combined)
-        #expect(messages.count == 1)
+        #expect(try framer.push(combined).count == 1)
     }
 
-    @Test("full request line round-trips through encoder then framer-style decode")
+    @Test("start_forward request line includes explicit null and round-trips")
     func encodeThenDecode() throws {
         let req = Request(id: 7, body: .startForward(remotePort: Port(3000), localPort: nil))
         let line = try NDJSONEncoder.line(req)
-        // The line includes explicit null for local_port (request-side semantics).
         let str = String(decoding: line, as: UTF8.self)
         #expect(str.contains("\"local_port\":null"))
         let decoded = try JSONDecoder().decode(Request.self, from: line.dropLast())
