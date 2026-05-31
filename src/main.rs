@@ -20,6 +20,7 @@ use ssh::config::{load_host_config, HostConfig};
 use ssh::connection::SshSession;
 use ssh::discovery::{discover_local_ports, discover_remote_ports};
 use std::path::Path;
+use std::path::PathBuf;
 use tui::app::{AppState, ForwardStatus, ViewMode};
 use tui::input::{handle_key, Action};
 use tui::ui::render;
@@ -45,6 +46,12 @@ enum Commands {
         /// Remote destination path (defaults to /tmp/<local_path>)
         remote_path: Option<String>,
     },
+    /// Run the headless daemon that serves the menu-bar app over a Unix socket
+    Daemon {
+        /// Socket path (defaults to the app-support daemon.sock)
+        #[arg(long)]
+        socket: Option<PathBuf>,
+    },
 }
 
 #[tokio::main]
@@ -57,6 +64,7 @@ async fn main() -> Result<()> {
             local_path,
             remote_path,
         }) => run_send_file(&host, &local_path, remote_path.as_deref()).await,
+        Some(Commands::Daemon { socket }) => ports::daemon::run(socket).await,
         None => {
             let host = cli.host.context("Host argument required for TUI mode")?;
             run_tui(&host).await

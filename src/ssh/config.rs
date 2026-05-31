@@ -53,6 +53,52 @@ fn dirs_ssh_config_path() -> PathBuf {
     home.join(".ssh").join("config")
 }
 
+/// Enumerate the host aliases declared in an ssh config string.
+///
+/// Returns the aliases in file order. Multi-token `Host` lines are expanded
+/// into one entry per token; tokens that are `*` or contain a glob (`*`/`?`)
+/// are skipped. Duplicate aliases are removed while preserving first-seen
+/// order.
+pub fn parse_host_aliases(config_str: &str) -> Vec<String> {
+    let mut aliases: Vec<String> = Vec::new();
+    for line in config_str.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let (key, value) = match trimmed.split_once(char::is_whitespace) {
+            Some((k, v)) => (k.to_lowercase(), v.trim()),
+            None => continue,
+        };
+        if key != "host" {
+            continue;
+        }
+        for token in value.split_whitespace() {
+            if token == "*" || token.contains('*') || token.contains('?') {
+                continue;
+            }
+            if !aliases.iter().any(|a| a == token) {
+                aliases.push(token.to_string());
+            }
+        }
+    }
+    aliases
+}
+
+/// List the host aliases available in `~/.ssh/config`.
+///
+/// Returns an empty list (not an error) when the config file is absent.
+pub fn list_host_aliases() -> Result<Vec<String>> {
+    let path = dirs_ssh_config_path();
+    match fs::read_to_string(&path) {
+        Ok(config_str) => Ok(parse_host_aliases(&config_str)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(e) => {
+            Err(e).with_context(|| format!("Failed to read SSH config at {}", path.display()))
+        }
+    }
+}
+
 fn dirs_home() -> PathBuf {
     home::home_dir().expect("Could not determine home directory")
 }
@@ -191,5 +237,35 @@ Host abskey
     fn test_ssh_config_path() {
         let path = dirs_ssh_config_path();
         assert!(path.ends_with(".ssh/config"));
+    }
+
+    // ---- parse_host_aliases ----
+
+    #[test]
+    fn parse_host_aliases_basic() {
+        let aliases = parse_host_aliases("Host a\nHost b *.x\nHost *\n");
+        assert_eq!(aliases, vec!["a".to_string(), "b".to_string()]);
+    }
+
+    #[test]
+    fn parse_host_aliases_skips_globs_and_dedupes() {
+        let cfg = "\
+# comment
+Host alpha beta
+    HostName 1.2.3.4
+Host gamma ?eta *.glob
+Host alpha
+Host *
+";
+        let aliases = parse_host_aliases(cfg);
+        assert_eq!(
+            aliases,
+            vec!["alpha".to_string(), "beta".to_string(), "gamma".to_string(),]
+        );
+    }
+
+    #[test]
+    fn parse_host_aliases_empty_config() {
+        assert!(parse_host_aliases("").is_empty());
     }
 }

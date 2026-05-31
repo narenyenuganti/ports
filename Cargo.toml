@@ -23,6 +23,11 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "1"
 
+[dev-dependencies]
+# `test-util` provides the paused-time runtime used by the daemon actor tests
+# (`#[tokio::test(start_paused = true)]`); it is not part of the `full` feature.
+tokio = { version = "1", features = ["full", "test-util"] }
+
 [lints.rust]
 unused_must_use = "deny"
 
