@@ -66,24 +66,38 @@ public struct PopoverView: View {
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, 12)
+        } else if model.visiblePorts.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                FilterBarView(query: model.portFilter, count: 0)
+                Text("No matching ports.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 12)
+            }
         } else {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    VStack(spacing: PopoverLayout.portListSpacing) {
-                        ForEach(model.state.ports, id: \.remotePort) { entry in
-                            PortTileView(entry: entry)
-                                .id(entry.remotePort.value)
+            VStack(alignment: .leading, spacing: 8) {
+                if model.isPortFiltering {
+                    FilterBarView(query: model.portFilter, count: model.visiblePorts.count)
+                }
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(spacing: PopoverLayout.portListSpacing) {
+                            ForEach(model.visiblePorts, id: \.remotePort) { entry in
+                                PortTileView(entry: entry)
+                                    .id(entry.remotePort.value)
+                            }
                         }
                     }
-                }
-                .onAppear { model.ensureSelection() }
-                .onChange(of: model.selectedRemotePort) { _, selectedRemotePort in
-                    guard let selectedRemotePort else { return }
-                    withAnimation(.easeOut(duration: 0.12)) {
-                        proxy.scrollTo(selectedRemotePort, anchor: .center)
+                    .onAppear { model.ensureSelection() }
+                    .onChange(of: model.selectedRemotePort) { _, selectedRemotePort in
+                        guard let selectedRemotePort else { return }
+                        withAnimation(.easeOut(duration: 0.12)) {
+                            proxy.scrollTo(selectedRemotePort, anchor: .center)
+                        }
                     }
+                    .frame(maxHeight: PopoverLayout.portListMaxHeight)
                 }
-                .frame(maxHeight: PopoverLayout.portListMaxHeight)
             }
         }
     }
@@ -191,5 +205,30 @@ struct ToastView: View {
         }
         .padding(8)
         .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+    }
+}
+
+// MARK: - Filter
+
+struct FilterBarView: View {
+    let query: String
+    let count: Int
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            Text(query.isEmpty ? "/" : query)
+                .font(.caption.monospaced())
+                .lineLimit(1)
+            Spacer()
+            Text("\(count)")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
     }
 }

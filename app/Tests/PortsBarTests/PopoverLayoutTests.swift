@@ -62,5 +62,10 @@ struct PopoverLayoutTests {
         #expect(PopoverKeyboardCommand(charactersIgnoringModifiers: nil, specialKey: .downArrow) == .selectNext)
         #expect(PopoverKeyboardCommand(charactersIgnoringModifiers: nil, specialKey: .upArrow) == .selectPrevious)
         #expect(PopoverKeyboardCommand(charactersIgnoringModifiers: nil, specialKey: .carriageReturn) == .toggleSelected)
+        #expect(PopoverKeyboardCommand(charactersIgnoringModifiers: "/", specialKey: nil) == .beginFilter)
+        #expect(PopoverKeyboardCommand(charactersIgnoringModifiers: "n", specialKey: nil) == .appendFilter("n"))
+        #expect(PopoverKeyboardCommand(charactersIgnoringModifiers: nil, specialKey: .delete) == .deleteFilterCharacter)
+        #expect(PopoverKeyboardCommand(charactersIgnoringModifiers: "\u{7F}", specialKey: nil) == .deleteFilterCharacter)
+        #expect(PopoverKeyboardCommand(charactersIgnoringModifiers: "\u{1B}", specialKey: nil) == .cancelFilter)
     }
 }
