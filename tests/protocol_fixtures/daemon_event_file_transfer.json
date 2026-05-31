@@ -1,0 +1,5 @@
+{
+  "event": "file_transfer",
+  "ok": false,
+  "detail": "transfer aborted"
+}

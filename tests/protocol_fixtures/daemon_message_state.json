@@ -1,0 +1,16 @@
+{
+  "type": "state",
+  "host": "prod",
+  "status": "connected",
+  "ports": [
+    {
+      "remote_port": 5432,
+      "process": "postgres",
+      "pid": 1234,
+      "forward": {
+        "state": "forwarding",
+        "local_port": 15432
+      }
+    }
+  ]
+}

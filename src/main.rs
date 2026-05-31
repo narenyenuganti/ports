@@ -56,13 +56,9 @@ async fn main() -> Result<()> {
             host,
             local_path,
             remote_path,
-        }) => {
-            run_send_file(&host, &local_path, remote_path.as_deref()).await
-        }
+        }) => run_send_file(&host, &local_path, remote_path.as_deref()).await,
         None => {
-            let host = cli
-                .host
-                .context("Host argument required for TUI mode")?;
+            let host = cli.host.context("Host argument required for TUI mode")?;
             run_tui(&host).await
         }
     }
@@ -80,10 +76,8 @@ async fn run_tui(host: &str) -> Result<()> {
     let session = SshSession::connect(&host_config).await?;
     let session = Arc::new(session);
 
-    let (remote_result, local_ports) = tokio::join!(
-        discover_remote_ports(&session),
-        discover_local_ports()
-    );
+    let (remote_result, local_ports) =
+        tokio::join!(discover_remote_ports(&session), discover_local_ports());
     let discovered = remote_result?;
 
     let mut state = AppState::new(host.to_string());
@@ -97,7 +91,14 @@ async fn run_tui(host: &str) -> Result<()> {
     let backend = CrosstermBackend::new(stdout());
     let mut terminal = Terminal::new(backend)?;
 
-    let result = run_loop(&mut terminal, &mut state, &mut fwd_manager, session, &host_config).await;
+    let result = run_loop(
+        &mut terminal,
+        &mut state,
+        &mut fwd_manager,
+        session,
+        &host_config,
+    )
+    .await;
 
     fwd_manager.stop_all();
     disable_raw_mode()?;
@@ -114,11 +115,13 @@ async fn run_send_file(host: &str, local_path: &str, remote_path: Option<&str>) 
 
     let remote_path = match remote_path {
         Some(p) => p.to_string(),
-        None => if local_path.starts_with('/') {
-            format!("/tmp{}", local_path)
-        } else {
-            format!("/tmp/{}", local_path)
-        },
+        None => {
+            if local_path.starts_with('/') {
+                format!("/tmp{}", local_path)
+            } else {
+                format!("/tmp/{}", local_path)
+            }
+        }
     };
 
     let host_config = load_host_config(host)
@@ -193,11 +196,14 @@ async fn run_loop(
                                                 match discover_remote_ports(&session).await {
                                                     Ok(ports) => {
                                                         state.update_ports(ports);
-                                                        state.status_message = Some("Reconnected".to_string());
+                                                        state.status_message =
+                                                            Some("Reconnected".to_string());
                                                     }
                                                     Err(e) => {
-                                                        state.status_message =
-                                                            Some(format!("Scan failed after reconnect: {}", e));
+                                                        state.status_message = Some(format!(
+                                                            "Scan failed after reconnect: {}",
+                                                            e
+                                                        ));
                                                     }
                                                 }
                                             }
@@ -220,8 +226,7 @@ async fn run_loop(
                         let url = format!("http://localhost:{}", port);
                         match open::that(&url) {
                             Ok(_) => {
-                                state.status_message =
-                                    Some(format!("Opened {}", url));
+                                state.status_message = Some(format!("Opened {}", url));
                             }
                             Err(e) => {
                                 state.status_message =
@@ -236,8 +241,7 @@ async fn run_loop(
                                 let url = format!("http://localhost:{}", local_port);
                                 match open::that(&url) {
                                     Ok(_) => {
-                                        state.status_message =
-                                            Some(format!("Opened {}", url));
+                                        state.status_message = Some(format!("Opened {}", url));
                                     }
                                     Err(e) => {
                                         state.status_message =
@@ -267,8 +271,7 @@ async fn run_loop(
                                 }
                                 Err(e) => {
                                     state.file_transfer_status = None;
-                                    state.status_message =
-                                        Some(format!("Send failed: {}", e));
+                                    state.status_message = Some(format!("Send failed: {}", e));
                                 }
                             }
                         }
@@ -349,8 +352,7 @@ async fn start_forward_with_port(
         }
         Err(e) => {
             state.set_forward_error(idx, format!("{}", e));
-            state.status_message =
-                Some(format!("Failed to forward port {}: {}", local_port, e));
+            state.status_message = Some(format!("Failed to forward port {}: {}", local_port, e));
         }
     }
 }

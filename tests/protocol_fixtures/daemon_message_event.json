@@ -1,0 +1,6 @@
+{
+  "type": "event",
+  "event": "file_transfer",
+  "ok": true,
+  "detail": "uploaded 3 files"
+}

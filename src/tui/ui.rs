@@ -6,11 +6,13 @@ use ratatui::{
     Frame,
 };
 
-use super::app::{AppState, ConnectionState, ForwardStatus, InputMode, SortOrder, SortState, ViewMode};
+use super::app::{
+    AppState, ConnectionState, ForwardStatus, InputMode, SortOrder, SortState, ViewMode,
+};
 
 pub fn render(f: &mut Frame, state: &mut AppState) {
     let chunks = Layout::vertical([
-        Constraint::Length(1),  // status bar
+        Constraint::Length(1), // status bar
         Constraint::Min(5),    // port table
         Constraint::Length(2), // help bar
     ])
@@ -83,9 +85,7 @@ fn render_remote_table(f: &mut Frame, state: &mut AppState, area: Rect) {
         col_names
             .iter()
             .enumerate()
-            .map(|(i, name)| {
-                Cell::from(format!("{}{}", name, sort_indicator(&state.sort, i)))
-            })
+            .map(|(i, name)| Cell::from(format!("{}{}", name, sort_indicator(&state.sort, i))))
             .collect::<Vec<_>>(),
     )
     .style(Style::default().add_modifier(Modifier::BOLD))
@@ -120,11 +120,7 @@ fn render_remote_table(f: &mut Frame, state: &mut AppState, area: Rect) {
                 ),
             };
 
-            let process = entry
-                .discovered
-                .process_name
-                .as_deref()
-                .unwrap_or("-");
+            let process = entry.discovered.process_name.as_deref().unwrap_or("-");
             let pid = entry
                 .discovered
                 .pid
@@ -157,7 +153,11 @@ fn render_remote_table(f: &mut Frame, state: &mut AppState, area: Rect) {
             .bg(Color::DarkGray)
             .add_modifier(Modifier::BOLD),
     )
-    .block(Block::default().borders(Borders::ALL).title(" Remote Ports "));
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Remote Ports "),
+    );
 
     let mut table_state = TableState::new()
         .with_offset(state.remote_scroll_offset)
@@ -172,9 +172,7 @@ fn render_local_table(f: &mut Frame, state: &mut AppState, area: Rect) {
         col_names
             .iter()
             .enumerate()
-            .map(|(i, name)| {
-                Cell::from(format!("{}{}", name, sort_indicator(&state.sort, i)))
-            })
+            .map(|(i, name)| Cell::from(format!("{}{}", name, sort_indicator(&state.sort, i))))
             .collect::<Vec<_>>(),
     )
     .style(Style::default().add_modifier(Modifier::BOLD))
@@ -224,7 +222,11 @@ fn render_local_table(f: &mut Frame, state: &mut AppState, area: Rect) {
             .bg(Color::DarkGray)
             .add_modifier(Modifier::BOLD),
     )
-    .block(Block::default().borders(Borders::ALL).title(" Local Ports "));
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Local Ports "),
+    );
 
     let mut table_state = TableState::new()
         .with_offset(state.local_scroll_offset)
@@ -240,32 +242,37 @@ fn render_help_bar(f: &mut Frame, state: &AppState, area: Rect) {
                 let enter_label = {
                     let sorted = state.sorted_ports();
                     match sorted.get(state.selected) {
-                        Some(entry) if matches!(entry.forward_status, ForwardStatus::Active { .. }) => " stop  ",
+                        Some(entry)
+                            if matches!(entry.forward_status, ForwardStatus::Active { .. }) =>
+                        {
+                            " stop  "
+                        }
                         _ => " forward  ",
                     }
                 };
                 Line::from(vec![
-                Span::styled("[enter]", Style::default().add_modifier(Modifier::BOLD)),
-                Span::raw(enter_label),
-                Span::styled("[o]", Style::default().add_modifier(Modifier::BOLD)),
-                Span::raw(" open  "),
-                Span::styled("[p]", Style::default().add_modifier(Modifier::BOLD)),
-                Span::raw(" change port  "),
-                Span::styled("[f]", Style::default().add_modifier(Modifier::BOLD)),
-                Span::raw(" send file  "),
-                Span::styled("[/]", Style::default().add_modifier(Modifier::BOLD)),
-                Span::raw(" search  "),
-                Span::styled("[s]", Style::default().add_modifier(Modifier::BOLD)),
-                Span::raw(" sort  "),
-                Span::styled("[r]", Style::default().add_modifier(Modifier::BOLD)),
-                Span::raw(" refresh  "),
-                Span::styled("[tab]", Style::default().add_modifier(Modifier::BOLD)),
-                Span::raw(" local  "),
-                Span::styled("[h]", Style::default().add_modifier(Modifier::BOLD)),
-                Span::raw(" help  "),
-                Span::styled("[q]", Style::default().add_modifier(Modifier::BOLD)),
-                Span::raw(" quit"),
-            ])},
+                    Span::styled("[enter]", Style::default().add_modifier(Modifier::BOLD)),
+                    Span::raw(enter_label),
+                    Span::styled("[o]", Style::default().add_modifier(Modifier::BOLD)),
+                    Span::raw(" open  "),
+                    Span::styled("[p]", Style::default().add_modifier(Modifier::BOLD)),
+                    Span::raw(" change port  "),
+                    Span::styled("[f]", Style::default().add_modifier(Modifier::BOLD)),
+                    Span::raw(" send file  "),
+                    Span::styled("[/]", Style::default().add_modifier(Modifier::BOLD)),
+                    Span::raw(" search  "),
+                    Span::styled("[s]", Style::default().add_modifier(Modifier::BOLD)),
+                    Span::raw(" sort  "),
+                    Span::styled("[r]", Style::default().add_modifier(Modifier::BOLD)),
+                    Span::raw(" refresh  "),
+                    Span::styled("[tab]", Style::default().add_modifier(Modifier::BOLD)),
+                    Span::raw(" local  "),
+                    Span::styled("[h]", Style::default().add_modifier(Modifier::BOLD)),
+                    Span::raw(" help  "),
+                    Span::styled("[q]", Style::default().add_modifier(Modifier::BOLD)),
+                    Span::raw(" quit"),
+                ])
+            }
             ViewMode::Local => Line::from(vec![
                 Span::styled("[o]", Style::default().add_modifier(Modifier::BOLD)),
                 Span::raw(" open  "),
@@ -296,10 +303,17 @@ fn render_help_bar(f: &mut Frame, state: &AppState, area: Rect) {
             };
             Line::from(vec![
                 Span::raw(" /"),
-                Span::styled(&state.search_query, Style::default().add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    &state.search_query,
+                    Style::default().add_modifier(Modifier::BOLD),
+                ),
                 Span::styled("_", Style::default().add_modifier(Modifier::SLOW_BLINK)),
                 Span::styled(
-                    format!("  {} match{}", match_count, if match_count == 1 { "" } else { "es" }),
+                    format!(
+                        "  {} match{}",
+                        match_count,
+                        if match_count == 1 { "" } else { "es" }
+                    ),
                     Style::default().fg(Color::DarkGray),
                 ),
                 Span::raw("  [enter] select  [esc] cancel"),
@@ -325,13 +339,25 @@ fn render_help_bar(f: &mut Frame, state: &AppState, area: Rect) {
                 }
             }
             spans.push(Span::raw("  "));
-            spans.push(Span::styled("[←/→]", Style::default().add_modifier(Modifier::BOLD)));
+            spans.push(Span::styled(
+                "[←/→]",
+                Style::default().add_modifier(Modifier::BOLD),
+            ));
             spans.push(Span::raw(" select  "));
-            spans.push(Span::styled("[enter]", Style::default().add_modifier(Modifier::BOLD)));
+            spans.push(Span::styled(
+                "[enter]",
+                Style::default().add_modifier(Modifier::BOLD),
+            ));
             spans.push(Span::raw(" sort  "));
-            spans.push(Span::styled("[r]", Style::default().add_modifier(Modifier::BOLD)));
+            spans.push(Span::styled(
+                "[r]",
+                Style::default().add_modifier(Modifier::BOLD),
+            ));
             spans.push(Span::raw(" reset  "));
-            spans.push(Span::styled("[esc]", Style::default().add_modifier(Modifier::BOLD)));
+            spans.push(Span::styled(
+                "[esc]",
+                Style::default().add_modifier(Modifier::BOLD),
+            ));
             spans.push(Span::raw(" cancel"));
             Line::from(spans)
         }
@@ -360,73 +386,158 @@ fn render_help_overlay(f: &mut Frame, state: &AppState) {
     let lines: Vec<Line> = match state.view_mode {
         ViewMode::Remote => vec![
             Line::from(vec![
-                Span::styled("  enter  ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "  enter  ",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::raw("Forward or stop the selected port"),
             ]),
             Line::from(vec![
-                Span::styled("  o      ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "  o      ",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::raw("Open port in browser (auto-forwards if needed)"),
             ]),
             Line::from(vec![
-                Span::styled("  p      ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "  p      ",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::raw("Forward with a custom local port number"),
             ]),
             Line::from(vec![
-                Span::styled("  f      ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "  f      ",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::raw("Send a local file to the remote machine"),
             ]),
             Line::from(vec![
-                Span::styled("  /      ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "  /      ",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::raw("Search and filter ports by any column"),
             ]),
             Line::from(vec![
-                Span::styled("  s      ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "  s      ",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::raw("Sort ports by a column"),
             ]),
             Line::from(vec![
-                Span::styled("  r      ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "  r      ",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::raw("Refresh ports, reconnect SSH if needed"),
             ]),
             Line::from(vec![
-                Span::styled("  tab    ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "  tab    ",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::raw("Switch to local ports view"),
             ]),
             Line::from(vec![
-                Span::styled("  h      ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "  h      ",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::raw("Show this help"),
             ]),
             Line::from(vec![
-                Span::styled("  q      ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "  q      ",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::raw("Quit"),
             ]),
         ],
         ViewMode::Local => vec![
             Line::from(vec![
-                Span::styled("  o      ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "  o      ",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::raw("Open port in browser"),
             ]),
             Line::from(vec![
-                Span::styled("  /      ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "  /      ",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::raw("Search and filter ports by any column"),
             ]),
             Line::from(vec![
-                Span::styled("  s      ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "  s      ",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::raw("Sort ports by a column"),
             ]),
             Line::from(vec![
-                Span::styled("  r      ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "  r      ",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::raw("Refresh the port list"),
             ]),
             Line::from(vec![
-                Span::styled("  tab    ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "  tab    ",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::raw("Switch to remote ports view"),
             ]),
             Line::from(vec![
-                Span::styled("  h      ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "  h      ",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::raw("Show this help"),
             ]),
             Line::from(vec![
-                Span::styled("  q      ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "  q      ",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::raw("Quit"),
             ]),
         ],
@@ -495,8 +606,14 @@ mod tests {
         let lines = render_lines(&mut state, 80, 10);
         let screen = lines.join("\n");
 
-        assert!(screen.contains("56387"), "screen did not show selected port:\n{screen}");
-        assert!(!screen.contains("4100"), "screen did not scroll away from top rows:\n{screen}");
+        assert!(
+            screen.contains("56387"),
+            "screen did not show selected port:\n{screen}"
+        );
+        assert!(
+            !screen.contains("4100"),
+            "screen did not scroll away from top rows:\n{screen}"
+        );
     }
 
     #[test]
@@ -511,7 +628,13 @@ mod tests {
         let lines = render_lines(&mut state, 80, 10);
         let screen = lines.join("\n");
 
-        assert!(screen.contains("56387"), "screen did not show selected port:\n{screen}");
-        assert!(!screen.contains("5100"), "screen did not scroll away from top rows:\n{screen}");
+        assert!(
+            screen.contains("56387"),
+            "screen did not show selected port:\n{screen}"
+        );
+        assert!(
+            !screen.contains("5100"),
+            "screen did not scroll away from top rows:\n{screen}"
+        );
     }
 }

@@ -1,0 +1,6 @@
+{
+  "remote_port": 8080,
+  "forward": {
+    "state": "idle"
+  }
+}

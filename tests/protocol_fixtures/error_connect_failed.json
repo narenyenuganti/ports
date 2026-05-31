@@ -1,0 +1,4 @@
+{
+  "kind": "connect_failed",
+  "detail": "handshake timed out"
+}

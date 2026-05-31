@@ -1,0 +1,6 @@
+{
+  "type": "set_config",
+  "host_alias": "prod",
+  "refresh_secs": 5,
+  "auto_reconnect": true
+}

@@ -179,7 +179,10 @@ Host abskey
 ";
         let result = parse_host_config("abskey", config).unwrap();
         assert!(!result.identity_files.is_empty());
-        assert_eq!(result.identity_files[0], PathBuf::from("/etc/ssh/special_key"));
+        assert_eq!(
+            result.identity_files[0],
+            PathBuf::from("/etc/ssh/special_key")
+        );
     }
 
     // ---- dirs_ssh_config_path ----
