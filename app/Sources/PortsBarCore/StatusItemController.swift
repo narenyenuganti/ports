@@ -35,13 +35,32 @@ final class StatusItemController {
             button.action = #selector(togglePopover(_:))
         }
 
-        // Re-render the menu-bar icon whenever daemon state changes.
+        // Re-render the menu-bar icon whenever daemon state changes, and force
+        // the popover's hosted SwiftUI view to flush its pending update.
+        //
+        // A detached NSHostingController inside an NSPopover schedules SwiftUI
+        // invalidations from async (daemon-stream) model changes but does not
+        // commit them until an AppKit event triggers a layout pass — so the
+        // tiles would otherwise lag one click behind the live model. We nudge a
+        // layout pass on the next run-loop turn (after @Published commits the
+        // new value) to flush the update immediately.
         model.$state
             .sink { [weak self] state in
-                MainActor.assumeIsolated { self?.updateButton(for: state) }
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.updateButton(for: state)
+                    DispatchQueue.main.async { self.flushPopoverContent() }
+                }
             }
             .store(in: &cancellables)
         updateButton(for: model.state)
+    }
+
+    /// Force the popover's hosted SwiftUI view to process any pending update.
+    private func flushPopoverContent() {
+        guard popover.isShown, let view = popover.contentViewController?.view else { return }
+        view.needsLayout = true
+        view.layoutSubtreeIfNeeded()
     }
 
     @objc private func togglePopover(_ sender: Any?) {
