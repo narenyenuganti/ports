@@ -59,6 +59,11 @@ Use one of these **seven** prefixes:
   the fast gate, **plus** the Swift build/test stage (guarded by
   `if [ -f app/Package.swift ]`), **plus** the explicitly-invoked
   thermo-nuclear review skills (see §9). Tier 2 is required before merge.
+- **Packaging gate (Phase 5):** to complete the gate for a packaged release,
+  run `make app` (assembles and ad-hoc signs `build/Ports.app`) followed by
+  `scripts/smoke-app.sh` (codesign verify + bundled-daemon socket ping +
+  login-item structure check). `gate-full.sh` runs `scripts/smoke-app.sh`
+  automatically when `build/Ports.app` exists, and skips it otherwise.
 
 ## 6. Rust daemon & protocol conventions
 
