@@ -144,6 +144,9 @@ actor DaemonClient {
     /// and start the read loop. Returns the message stream.
     func start() async throws -> AsyncStream<DaemonMessage> {
         if !socketIsLive() {
+            // Remove a stale socket file (daemon died but left the inode behind)
+            // so the freshly spawned daemon can bind the path cleanly.
+            try? FileManager.default.removeItem(atPath: socketPath)
             try spawnDaemon()
         }
         try await connectSocket()
@@ -184,8 +187,15 @@ actor DaemonClient {
         process = proc
     }
 
+    /// A socket is "live" only if a daemon is actually listening on it. Checking
+    /// file existence alone is wrong: a daemon that died leaves a stale socket
+    /// inode behind, and connecting to it fails with ECONNREFUSED. We probe with
+    /// a real connect and close it immediately on success.
     private func socketIsLive() -> Bool {
-        FileManager.default.fileExists(atPath: socketPath)
+        guard FileManager.default.fileExists(atPath: socketPath) else { return false }
+        guard let probe = try? attemptConnect() else { return false }
+        close(probe)
+        return true
     }
 
     private func connectSocket() async throws {
