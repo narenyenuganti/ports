@@ -8,6 +8,7 @@
 //! - the server: a `UnixListener` with per-connection relays (later task).
 //! - the supervisor: socket path, single-instance guard, signals (later task).
 
+pub mod actor;
 pub mod engine;
 
 use std::path::PathBuf;
