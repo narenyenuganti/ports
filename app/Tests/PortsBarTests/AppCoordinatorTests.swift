@@ -24,7 +24,7 @@ struct AppCoordinatorTests {
         }
         await coordinator.start()
         if case .failed = coordinator.phase {
-            #expect(model.state.connStatus == .error)
+            #expect(model.state.status == .error)
         } else {
             // If a binary was somehow located, that's also a valid outcome;
             // just assert we left the idle phase.

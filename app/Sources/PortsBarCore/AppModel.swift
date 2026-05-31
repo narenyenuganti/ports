@@ -6,7 +6,7 @@ import SwiftUI
 // Abstracts the daemon transport so AppModel is testable without a real socket.
 // DaemonClient conforms via an extension below.
 
-protocol RequestSending: Sendable {
+public protocol RequestSending: Sendable {
     func send(_ request: Request) async throws
 }
 
