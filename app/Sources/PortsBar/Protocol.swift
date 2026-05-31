@@ -1,88 +1,110 @@
 import Foundation
 
-// MARK: - Newtype identifiers
+// MARK: - Identifiers
 //
-// `ForwardId` and `Port` serialize transparently as bare JSON numbers, mirroring
-// the `#[serde(transparent)]` Rust newtypes in `src/protocol/ids.rs`. They are
-// modeled as thin `RawRepresentable`-style wrappers that encode/decode to a
-// single value container so the wire stays a bare integer.
+// These mirror the Rust `#[serde(transparent)]` newtypes in src/protocol/ids.rs.
+// They serialize as bare scalars (numbers / strings), not objects.
 
-/// Stable identifier for a single port-forward managed by the daemon.
-///
-/// Mirrors Rust `ForwardId(pub u64)`; serializes as a bare JSON number.
-public struct ForwardId: Codable, Hashable, Sendable {
+/// Unique identifier for a forward, assigned by the daemon. Bare number on the wire.
+public struct ForwardId: Codable, Sendable, Hashable {
     public var value: UInt64
     public init(_ value: UInt64) { self.value = value }
 
     public init(from decoder: any Decoder) throws {
-        let container = try decoder.singleValueContainer()
-        value = try container.decode(UInt64.self)
+        let c = try decoder.singleValueContainer()
+        value = try c.decode(UInt64.self)
     }
 
     public func encode(to encoder: any Encoder) throws {
-        var container = encoder.singleValueContainer()
-        try container.encode(value)
+        var c = encoder.singleValueContainer()
+        try c.encode(value)
     }
 }
 
-/// A TCP port number (local or remote).
-///
-/// Mirrors Rust `Port(pub u16)`; serializes as a bare JSON number.
-public struct Port: Codable, Hashable, Sendable, ExpressibleByIntegerLiteral {
+/// A TCP port number. Bare number on the wire.
+public struct Port: Codable, Sendable, Hashable {
     public var value: UInt16
     public init(_ value: UInt16) { self.value = value }
-    public init(integerLiteral value: UInt16) { self.value = value }
 
     public init(from decoder: any Decoder) throws {
-        let container = try decoder.singleValueContainer()
-        value = try container.decode(UInt16.self)
+        let c = try decoder.singleValueContainer()
+        value = try c.decode(UInt16.self)
     }
 
     public func encode(to encoder: any Encoder) throws {
-        var container = encoder.singleValueContainer()
-        try container.encode(value)
+        var c = encoder.singleValueContainer()
+        try c.encode(value)
     }
 }
 
-// MARK: - Wire error
-//
-// Mirrors Rust `ProtocolError` — internally tagged with key `kind`, snake_case.
+/// SSH host alias. Bare string on the wire.
+public struct HostAlias: Codable, Sendable, Hashable {
+    public var value: String
+    public init(_ value: String) { self.value = value }
 
-/// The only error type that crosses the socket. Mirrors Rust `ProtocolError`.
-public enum ProtocolError: Codable, Hashable, Sendable, Error {
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        value = try c.decode(String.self)
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(value)
+    }
+}
+
+// MARK: - ProtocolError
+//
+// Mirrors src/protocol/error.rs: internally tagged with key "kind", snake_case.
+
+public enum ProtocolError: Codable, Sendable, Hashable, Error {
+    case hostNotFound(alias: String)
+    case connectionFailed(reason: String)
+    case ssh(message: String)
+    case bindFailed(port: UInt16, reason: String)
+    case forwardNotFound(id: UInt64)
     case notConnected
-    case connectFailed(detail: String)
-    case bindFailed(port: Port, detail: String)
-    case unknownHost(alias: String)
-    case sendFileFailed(detail: String)
-    case badRequest(detail: String)
+    case invalidRequest(reason: String)
+    case io(message: String)
+    case timeout
+    case `internal`(message: String)
 
     private enum CodingKeys: String, CodingKey {
         case kind
-        case detail
-        case port
         case alias
+        case reason
+        case message
+        case port
+        case id
     }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let kind = try c.decode(String.self, forKey: .kind)
         switch kind {
-        case "not_connected":
-            self = .notConnected
-        case "connect_failed":
-            self = .connectFailed(detail: try c.decode(String.self, forKey: .detail))
+        case "host_not_found":
+            self = .hostNotFound(alias: try c.decode(String.self, forKey: .alias))
+        case "connection_failed":
+            self = .connectionFailed(reason: try c.decode(String.self, forKey: .reason))
+        case "ssh":
+            self = .ssh(message: try c.decode(String.self, forKey: .message))
         case "bind_failed":
             self = .bindFailed(
-                port: try c.decode(Port.self, forKey: .port),
-                detail: try c.decode(String.self, forKey: .detail)
+                port: try c.decode(UInt16.self, forKey: .port),
+                reason: try c.decode(String.self, forKey: .reason)
             )
-        case "unknown_host":
-            self = .unknownHost(alias: try c.decode(String.self, forKey: .alias))
-        case "send_file_failed":
-            self = .sendFileFailed(detail: try c.decode(String.self, forKey: .detail))
-        case "bad_request":
-            self = .badRequest(detail: try c.decode(String.self, forKey: .detail))
+        case "forward_not_found":
+            self = .forwardNotFound(id: try c.decode(UInt64.self, forKey: .id))
+        case "not_connected":
+            self = .notConnected
+        case "invalid_request":
+            self = .invalidRequest(reason: try c.decode(String.self, forKey: .reason))
+        case "io":
+            self = .io(message: try c.decode(String.self, forKey: .message))
+        case "timeout":
+            self = .timeout
+        case "internal":
+            self = .`internal`(message: try c.decode(String.self, forKey: .message))
         default:
             throw DecodingError.dataCorruptedError(
                 forKey: .kind, in: c,
@@ -94,54 +116,63 @@ public enum ProtocolError: Codable, Hashable, Sendable, Error {
     public func encode(to encoder: any Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         switch self {
-        case .notConnected:
-            try c.encode("not_connected", forKey: .kind)
-        case .connectFailed(let detail):
-            try c.encode("connect_failed", forKey: .kind)
-            try c.encode(detail, forKey: .detail)
-        case .bindFailed(let port, let detail):
+        case .hostNotFound(let alias):
+            try c.encode("host_not_found", forKey: .kind)
+            try c.encode(alias, forKey: .alias)
+        case .connectionFailed(let reason):
+            try c.encode("connection_failed", forKey: .kind)
+            try c.encode(reason, forKey: .reason)
+        case .ssh(let message):
+            try c.encode("ssh", forKey: .kind)
+            try c.encode(message, forKey: .message)
+        case .bindFailed(let port, let reason):
             try c.encode("bind_failed", forKey: .kind)
             try c.encode(port, forKey: .port)
-            try c.encode(detail, forKey: .detail)
-        case .unknownHost(let alias):
-            try c.encode("unknown_host", forKey: .kind)
-            try c.encode(alias, forKey: .alias)
-        case .sendFileFailed(let detail):
-            try c.encode("send_file_failed", forKey: .kind)
-            try c.encode(detail, forKey: .detail)
-        case .badRequest(let detail):
-            try c.encode("bad_request", forKey: .kind)
-            try c.encode(detail, forKey: .detail)
+            try c.encode(reason, forKey: .reason)
+        case .forwardNotFound(let id):
+            try c.encode("forward_not_found", forKey: .kind)
+            try c.encode(id, forKey: .id)
+        case .notConnected:
+            try c.encode("not_connected", forKey: .kind)
+        case .invalidRequest(let reason):
+            try c.encode("invalid_request", forKey: .kind)
+            try c.encode(reason, forKey: .reason)
+        case .io(let message):
+            try c.encode("io", forKey: .kind)
+            try c.encode(message, forKey: .message)
+        case .timeout:
+            try c.encode("timeout", forKey: .kind)
+        case .`internal`(let message):
+            try c.encode("internal", forKey: .kind)
+            try c.encode(message, forKey: .message)
         }
     }
 }
 
-// MARK: - Connection status
+// MARK: - ConnStatus
 //
-// Mirrors Rust `ConnStatus` — bare snake_case strings.
+// Mirrors src/protocol/message.rs: bare snake_case strings.
 
-/// The daemon's connection status. Mirrors Rust `ConnStatus`.
-public enum ConnStatus: String, Codable, Hashable, Sendable {
+public enum ConnStatus: String, Codable, Sendable, Hashable {
     case disconnected
     case connecting
     case connected
     case error
 }
 
-// MARK: - Forward state
+// MARK: - ForwardState
 //
-// Mirrors Rust `ForwardState` — internally tagged with key `state`, snake_case.
+// Mirrors src/protocol/message.rs: internally tagged with key "state", snake_case.
 
-/// The forwarding state of a single port. Mirrors Rust `ForwardState`.
-public enum ForwardState: Codable, Hashable, Sendable {
+public enum ForwardState: Codable, Sendable, Hashable {
     case idle
     case forwarding(localPort: Port)
-    case error(detail: String)
+    case error(message: String)
 
     private enum CodingKeys: String, CodingKey {
         case state
         case localPort = "local_port"
-        case detail
+        case message
     }
 
     public init(from decoder: any Decoder) throws {
@@ -153,7 +184,7 @@ public enum ForwardState: Codable, Hashable, Sendable {
         case "forwarding":
             self = .forwarding(localPort: try c.decode(Port.self, forKey: .localPort))
         case "error":
-            self = .error(detail: try c.decode(String.self, forKey: .detail))
+            self = .error(message: try c.decode(String.self, forKey: .message))
         default:
             throw DecodingError.dataCorruptedError(
                 forKey: .state, in: c,
@@ -170,132 +201,172 @@ public enum ForwardState: Codable, Hashable, Sendable {
         case .forwarding(let localPort):
             try c.encode("forwarding", forKey: .state)
             try c.encode(localPort, forKey: .localPort)
-        case .error(let detail):
+        case .error(let message):
             try c.encode("error", forKey: .state)
-            try c.encode(detail, forKey: .detail)
+            try c.encode(message, forKey: .message)
         }
     }
 }
 
-// MARK: - Port entry
+// MARK: - PortForward
 //
-// Mirrors Rust `PortEntry`. `process`/`pid` are OMITTED when nil on the
-// daemon->app side; the decoder treats both missing and explicit null as nil.
+// Mirrors src/protocol/message.rs PortForward. Daemon OMITS nil optionals;
+// decodeIfPresent treats both missing keys and explicit null as nil.
 
-/// A single port observed on the host and its forwarding state.
-public struct PortEntry: Codable, Hashable, Sendable, Identifiable {
+public struct PortForward: Codable, Sendable, Hashable {
+    public var id: ForwardId
     public var remotePort: Port
+    public var status: ForwardState
+    public var statusDetail: String?
     public var process: String?
     public var pid: UInt32?
-    public var forward: ForwardState
 
-    /// Stable identity for SwiftUI lists: the remote port is unique per host.
-    public var id: UInt16 { remotePort.value }
-
-    public init(remotePort: Port, process: String? = nil, pid: UInt32? = nil, forward: ForwardState) {
+    public init(
+        id: ForwardId,
+        remotePort: Port,
+        status: ForwardState,
+        statusDetail: String? = nil,
+        process: String? = nil,
+        pid: UInt32? = nil
+    ) {
+        self.id = id
         self.remotePort = remotePort
+        self.status = status
+        self.statusDetail = statusDetail
         self.process = process
         self.pid = pid
-        self.forward = forward
     }
 
     private enum CodingKeys: String, CodingKey {
+        case id
         case remotePort = "remote_port"
+        case status
+        case statusDetail = "status_detail"
         case process
         case pid
-        case forward
     }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(ForwardId.self, forKey: .id)
         remotePort = try c.decode(Port.self, forKey: .remotePort)
+        status = try c.decode(ForwardState.self, forKey: .status)
+        statusDetail = try c.decodeIfPresent(String.self, forKey: .statusDetail)
         process = try c.decodeIfPresent(String.self, forKey: .process)
         pid = try c.decodeIfPresent(UInt32.self, forKey: .pid)
-        forward = try c.decode(ForwardState.self, forKey: .forward)
     }
 
     public func encode(to encoder: any Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
         try c.encode(remotePort, forKey: .remotePort)
+        try c.encode(status, forKey: .status)
+        // Daemon-side semantics: omit nil optionals.
+        try c.encodeIfPresent(statusDetail, forKey: .statusDetail)
         try c.encodeIfPresent(process, forKey: .process)
         try c.encodeIfPresent(pid, forKey: .pid)
-        try c.encode(forward, forKey: .forward)
     }
 }
 
-// MARK: - State snapshot
-//
-// Mirrors Rust `StateSnapshot`. `host` is always present (may be null);
-// `status_detail` is omitted when nil on the daemon->app side.
+// MARK: - StateSnapshot
 
-/// A complete snapshot of the daemon's connection and port state.
-public struct StateSnapshot: Codable, Hashable, Sendable {
-    public var host: String?
-    public var status: ConnStatus
-    public var statusDetail: String?
-    public var ports: [PortEntry]
+public struct StateSnapshot: Codable, Sendable, Hashable {
+    public var host: HostAlias?
+    public var connStatus: ConnStatus
+    public var forwards: [PortForward]
 
-    public init(
-        host: String? = nil,
-        status: ConnStatus = .disconnected,
-        statusDetail: String? = nil,
-        ports: [PortEntry] = []
-    ) {
+    public init(host: HostAlias?, connStatus: ConnStatus, forwards: [PortForward]) {
         self.host = host
-        self.status = status
-        self.statusDetail = statusDetail
-        self.ports = ports
+        self.connStatus = connStatus
+        self.forwards = forwards
     }
 
     private enum CodingKeys: String, CodingKey {
         case host
-        case status
-        case statusDetail = "status_detail"
-        case ports
+        case connStatus = "conn_status"
+        case forwards
     }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        // `host` is `Option<String>` and always serialized (may be explicit
-        // null); decodeIfPresent handles both missing and null defensively.
-        host = try c.decodeIfPresent(String.self, forKey: .host)
-        status = try c.decode(ConnStatus.self, forKey: .status)
-        statusDetail = try c.decodeIfPresent(String.self, forKey: .statusDetail)
-        ports = try c.decode([PortEntry].self, forKey: .ports)
+        host = try c.decodeIfPresent(HostAlias.self, forKey: .host)
+        connStatus = try c.decode(ConnStatus.self, forKey: .connStatus)
+        forwards = try c.decode([PortForward].self, forKey: .forwards)
     }
 
     public func encode(to encoder: any Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
-        // Mirror Rust: `host` is always present in the snapshot (possibly null).
         try c.encode(host, forKey: .host)
-        try c.encode(status, forKey: .status)
-        try c.encodeIfPresent(statusDetail, forKey: .statusDetail)
-        try c.encode(ports, forKey: .ports)
+        try c.encode(connStatus, forKey: .connStatus)
+        try c.encode(forwards, forKey: .forwards)
     }
 }
 
-// MARK: - Daemon events
-//
-// Mirrors Rust `DaemonEvent` — internally tagged with key `event`, snake_case.
+// MARK: - DaemonConfig
 
-/// An asynchronous event emitted by the daemon. Mirrors Rust `DaemonEvent`.
-public enum DaemonEvent: Codable, Hashable, Sendable {
-    case fileTransfer(ok: Bool, detail: String)
+public struct DaemonConfig: Codable, Sendable, Hashable {
+    public var autoReconnect: Bool
+    public var autoRefreshSecs: UInt64
+    public var openBrowserOnForward: Bool
+
+    public init(autoReconnect: Bool, autoRefreshSecs: UInt64, openBrowserOnForward: Bool) {
+        self.autoReconnect = autoReconnect
+        self.autoRefreshSecs = autoRefreshSecs
+        self.openBrowserOnForward = openBrowserOnForward
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case autoReconnect = "auto_reconnect"
+        case autoRefreshSecs = "auto_refresh_secs"
+        case openBrowserOnForward = "open_browser_on_forward"
+    }
+}
+
+// MARK: - DaemonEvent
+//
+// Mirrors src/protocol/message.rs: internally tagged with key "event", snake_case.
+
+public enum DaemonEvent: Codable, Sendable, Hashable {
+    case connStatusChanged(connStatus: ConnStatus)
+    case forwardAdded(forward: PortForward)
+    case forwardRemoved(forwardId: ForwardId)
+    case fileTransfer(localPath: String, bytesTransferred: UInt64, totalBytes: UInt64?, done: Bool)
+    case log(level: String, message: String)
 
     private enum CodingKeys: String, CodingKey {
         case event
-        case ok
-        case detail
+        case connStatus = "conn_status"
+        case forward
+        case forwardId = "forward_id"
+        case localPath = "local_path"
+        case bytesTransferred = "bytes_transferred"
+        case totalBytes = "total_bytes"
+        case done
+        case level
+        case message
     }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let event = try c.decode(String.self, forKey: .event)
         switch event {
+        case "conn_status_changed":
+            self = .connStatusChanged(connStatus: try c.decode(ConnStatus.self, forKey: .connStatus))
+        case "forward_added":
+            self = .forwardAdded(forward: try c.decode(PortForward.self, forKey: .forward))
+        case "forward_removed":
+            self = .forwardRemoved(forwardId: try c.decode(ForwardId.self, forKey: .forwardId))
         case "file_transfer":
             self = .fileTransfer(
-                ok: try c.decode(Bool.self, forKey: .ok),
-                detail: try c.decode(String.self, forKey: .detail)
+                localPath: try c.decode(String.self, forKey: .localPath),
+                bytesTransferred: try c.decode(UInt64.self, forKey: .bytesTransferred),
+                totalBytes: try c.decodeIfPresent(UInt64.self, forKey: .totalBytes),
+                done: try c.decode(Bool.self, forKey: .done)
+            )
+        case "log":
+            self = .log(
+                level: try c.decode(String.self, forKey: .level),
+                message: try c.decode(String.self, forKey: .message)
             )
         default:
             throw DecodingError.dataCorruptedError(
@@ -308,23 +379,38 @@ public enum DaemonEvent: Codable, Hashable, Sendable {
     public func encode(to encoder: any Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         switch self {
-        case .fileTransfer(let ok, let detail):
+        case .connStatusChanged(let connStatus):
+            try c.encode("conn_status_changed", forKey: .event)
+            try c.encode(connStatus, forKey: .connStatus)
+        case .forwardAdded(let forward):
+            try c.encode("forward_added", forKey: .event)
+            try c.encode(forward, forKey: .forward)
+        case .forwardRemoved(let forwardId):
+            try c.encode("forward_removed", forKey: .event)
+            try c.encode(forwardId, forKey: .forwardId)
+        case .fileTransfer(let localPath, let bytesTransferred, let totalBytes, let done):
             try c.encode("file_transfer", forKey: .event)
-            try c.encode(ok, forKey: .ok)
-            try c.encode(detail, forKey: .detail)
+            try c.encode(localPath, forKey: .localPath)
+            try c.encode(bytesTransferred, forKey: .bytesTransferred)
+            try c.encodeIfPresent(totalBytes, forKey: .totalBytes)
+            try c.encode(done, forKey: .done)
+        case .log(let level, let message):
+            try c.encode("log", forKey: .event)
+            try c.encode(level, forKey: .level)
+            try c.encode(message, forKey: .message)
         }
     }
 }
 
-// MARK: - Daemon messages (daemon -> app)
+// MARK: - DaemonMessage
 //
-// Mirrors Rust `DaemonMessage` — internally tagged with key `type`, snake_case.
-// `State` and `Event` flatten the inner payload alongside the discriminator.
+// Mirrors src/protocol/message.rs: internally tagged with key "type", snake_case.
+// State wraps StateSnapshot's fields inline (untagged newtype variant ->
+// fields are flattened alongside "type"). Ack OMITS nil optionals.
 
-/// A message sent from the daemon to the client. Mirrors Rust `DaemonMessage`.
-public enum DaemonMessage: Codable, Hashable, Sendable {
+public enum DaemonMessage: Codable, Sendable, Hashable {
     case state(StateSnapshot)
-    case ack(id: UInt64, error: ProtocolError?, hosts: [String]?)
+    case ack(id: UInt64, error: ProtocolError?, hosts: [HostAlias]?)
     case event(DaemonEvent)
 
     private enum TypeKey: String, CodingKey {
@@ -342,113 +428,96 @@ public enum DaemonMessage: Codable, Hashable, Sendable {
         let type = try tc.decode(String.self, forKey: .type)
         switch type {
         case "state":
-            // `State(StateSnapshot)` is `#[serde(tag = "type")]` on a newtype
-            // variant, so the snapshot fields are flattened at this level.
+            // State(StateSnapshot) is a newtype variant: its fields sit inline
+            // next to "type", so decode the snapshot from the same container.
             self = .state(try StateSnapshot(from: decoder))
         case "ack":
-            let ac = try decoder.container(keyedBy: AckKeys.self)
+            let c = try decoder.container(keyedBy: AckKeys.self)
             self = .ack(
-                id: try ac.decode(UInt64.self, forKey: .id),
-                // Daemon omits these when nil; treat missing and null as nil.
-                error: try ac.decodeIfPresent(ProtocolError.self, forKey: .error),
-                hosts: try ac.decodeIfPresent([String].self, forKey: .hosts)
+                id: try c.decode(UInt64.self, forKey: .id),
+                error: try c.decodeIfPresent(ProtocolError.self, forKey: .error),
+                hosts: try c.decodeIfPresent([HostAlias].self, forKey: .hosts)
             )
         case "event":
-            // `Event(DaemonEvent)` flattens the event payload at this level.
+            // Event(DaemonEvent) is a newtype variant: the event fields are inline.
             self = .event(try DaemonEvent(from: decoder))
         default:
             throw DecodingError.dataCorruptedError(
-                forKey: .type, in: tc,
+                forKey: TypeKey.type, in: tc,
                 debugDescription: "unknown DaemonMessage type: \(type)"
             )
         }
     }
 
     public func encode(to encoder: any Encoder) throws {
+        var tc = encoder.container(keyedBy: TypeKey.self)
         switch self {
         case .state(let snapshot):
-            var tc = encoder.container(keyedBy: TypeKey.self)
             try tc.encode("state", forKey: .type)
             try snapshot.encode(to: encoder)
         case .ack(let id, let error, let hosts):
-            var tc = encoder.container(keyedBy: TypeKey.self)
             try tc.encode("ack", forKey: .type)
-            var ac = encoder.container(keyedBy: AckKeys.self)
-            try ac.encode(id, forKey: .id)
-            try ac.encodeIfPresent(error, forKey: .error)
-            try ac.encodeIfPresent(hosts, forKey: .hosts)
+            var c = encoder.container(keyedBy: AckKeys.self)
+            try c.encode(id, forKey: .id)
+            try c.encodeIfPresent(error, forKey: .error)
+            try c.encodeIfPresent(hosts, forKey: .hosts)
         case .event(let event):
-            var tc = encoder.container(keyedBy: TypeKey.self)
             try tc.encode("event", forKey: .type)
             try event.encode(to: encoder)
         }
     }
 }
 
-// MARK: - Requests (app -> daemon)
+// MARK: - RequestBody
 //
-// Mirrors Rust `RequestBody` — internally tagged with key `type`, snake_case.
+// Mirrors src/protocol/message.rs: internally tagged with key "type", snake_case.
+// ASYMMETRY: on the request side, StartForward.local_port and
+// SendFile.remote_path serialize as EXPLICIT null when absent (no skip), but
+// decoding must still accept a missing key or null (decodeIfPresent).
 
-/// The action carried by a ``Request``. Mirrors Rust `RequestBody`.
-public enum RequestBody: Codable, Hashable, Sendable {
-    case setConfig(hostAlias: String, refreshSecs: UInt64, autoReconnect: Bool)
-    case connect
+public enum RequestBody: Codable, Sendable, Hashable {
+    case connect(host: HostAlias)
     case disconnect
-    case refresh
     case startForward(remotePort: Port, localPort: Port?)
     case stopForward(remotePort: Port)
-    case sendFile(localPath: String, remotePath: String?)
     case listHosts
-    case ping
-    case shutdown
+    case sendFile(localPath: String, remotePath: String?)
+    case setConfig(config: DaemonConfig)
 
-    fileprivate enum CodingKeys: String, CodingKey {
+    private enum CodingKeys: String, CodingKey {
         case type
-        case hostAlias = "host_alias"
-        case refreshSecs = "refresh_secs"
-        case autoReconnect = "auto_reconnect"
+        case host
         case remotePort = "remote_port"
         case localPort = "local_port"
         case localPath = "local_path"
         case remotePath = "remote_path"
+        case config
     }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let type = try c.decode(String.self, forKey: .type)
         switch type {
-        case "set_config":
-            self = .setConfig(
-                hostAlias: try c.decode(String.self, forKey: .hostAlias),
-                refreshSecs: try c.decode(UInt64.self, forKey: .refreshSecs),
-                autoReconnect: try c.decode(Bool.self, forKey: .autoReconnect)
-            )
         case "connect":
-            self = .connect
+            self = .connect(host: try c.decode(HostAlias.self, forKey: .host))
         case "disconnect":
             self = .disconnect
-        case "refresh":
-            self = .refresh
         case "start_forward":
             self = .startForward(
                 remotePort: try c.decode(Port.self, forKey: .remotePort),
-                // The daemon serializes `local_port` as an explicit null when
-                // absent; decodeIfPresent treats both missing and null as nil.
                 localPort: try c.decodeIfPresent(Port.self, forKey: .localPort)
             )
         case "stop_forward":
             self = .stopForward(remotePort: try c.decode(Port.self, forKey: .remotePort))
+        case "list_hosts":
+            self = .listHosts
         case "send_file":
             self = .sendFile(
                 localPath: try c.decode(String.self, forKey: .localPath),
                 remotePath: try c.decodeIfPresent(String.self, forKey: .remotePath)
             )
-        case "list_hosts":
-            self = .listHosts
-        case "ping":
-            self = .ping
-        case "shutdown":
-            self = .shutdown
+        case "set_config":
+            self = .setConfig(config: try c.decode(DaemonConfig.self, forKey: .config))
         default:
             throw DecodingError.dataCorruptedError(
                 forKey: .type, in: c,
@@ -460,46 +529,39 @@ public enum RequestBody: Codable, Hashable, Sendable {
     public func encode(to encoder: any Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         switch self {
-        case .setConfig(let hostAlias, let refreshSecs, let autoReconnect):
-            try c.encode("set_config", forKey: .type)
-            try c.encode(hostAlias, forKey: .hostAlias)
-            try c.encode(refreshSecs, forKey: .refreshSecs)
-            try c.encode(autoReconnect, forKey: .autoReconnect)
-        case .connect:
+        case .connect(let host):
             try c.encode("connect", forKey: .type)
+            try c.encode(host, forKey: .host)
         case .disconnect:
             try c.encode("disconnect", forKey: .type)
-        case .refresh:
-            try c.encode("refresh", forKey: .type)
         case .startForward(let remotePort, let localPort):
             try c.encode("start_forward", forKey: .type)
             try c.encode(remotePort, forKey: .remotePort)
-            // CRITICAL ASYMMETRY: emit explicit null when absent (Rust does not
-            // skip this field on the request side). Rust accepts null or omit.
+            // Request side: emit explicit null when absent (Rust #[serde(default)]
+            // accepts both null and omitted; we emit null to match the fixture).
             try c.encode(localPort, forKey: .localPort)
         case .stopForward(let remotePort):
             try c.encode("stop_forward", forKey: .type)
             try c.encode(remotePort, forKey: .remotePort)
+        case .listHosts:
+            try c.encode("list_hosts", forKey: .type)
         case .sendFile(let localPath, let remotePath):
             try c.encode("send_file", forKey: .type)
             try c.encode(localPath, forKey: .localPath)
-            // Same asymmetry: emit explicit null when absent.
+            // Request side: emit explicit null when absent.
             try c.encode(remotePath, forKey: .remotePath)
-        case .listHosts:
-            try c.encode("list_hosts", forKey: .type)
-        case .ping:
-            try c.encode("ping", forKey: .type)
-        case .shutdown:
-            try c.encode("shutdown", forKey: .type)
+        case .setConfig(let config):
+            try c.encode("set_config", forKey: .type)
+            try c.encode(config, forKey: .config)
         }
     }
 }
 
-/// A request sent from the client (Swift app) to the daemon.
-///
-/// Mirrors Rust `Request { id, #[serde(flatten)] body }`: the JSON object
-/// carries `id` alongside the `type`-tagged body fields at the top level.
-public struct Request: Codable, Hashable, Sendable {
+// MARK: - Request
+//
+// Mirrors src/protocol/message.rs Request: { id, ...flattened body }.
+
+public struct Request: Codable, Sendable, Hashable {
     public var id: UInt64
     public var body: RequestBody
 
@@ -508,18 +570,18 @@ public struct Request: Codable, Hashable, Sendable {
         self.body = body
     }
 
-    private enum IDKey: String, CodingKey {
+    private enum IdKey: String, CodingKey {
         case id
     }
 
     public init(from decoder: any Decoder) throws {
-        let c = try decoder.container(keyedBy: IDKey.self)
+        let c = try decoder.container(keyedBy: IdKey.self)
         id = try c.decode(UInt64.self, forKey: .id)
         body = try RequestBody(from: decoder)
     }
 
     public func encode(to encoder: any Encoder) throws {
-        var c = encoder.container(keyedBy: IDKey.self)
+        var c = encoder.container(keyedBy: IdKey.self)
         try c.encode(id, forKey: .id)
         try body.encode(to: encoder)
     }
