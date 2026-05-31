@@ -1,6 +1,10 @@
 import AppKit
 import SwiftUI
 
+enum PopoverLayout {
+    static let portListMaxHeight: CGFloat = 680
+}
+
 // MARK: - PopoverView
 //
 // Thin model-view: header (status dot + host + gear), one tile per PortEntry,
@@ -65,7 +69,7 @@ public struct PopoverView: View {
                     }
                 }
             }
-            .frame(maxHeight: 520)
+            .frame(maxHeight: PopoverLayout.portListMaxHeight)
         }
     }
 }
