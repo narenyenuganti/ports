@@ -428,7 +428,11 @@ impl Actor {
 
     /// Run the actor loop until `Shutdown` is received or the token is cancelled.
     pub async fn run(mut self, mut rx: mpsc::Receiver<ActorMsg>, cancel: CancellationToken) {
-        let mut ticker = interval(self.refresh_interval());
+        // Track the period the live ticker was built with so we can detect when
+        // a SetConfig changes the effective cadence and rebuild it. The config
+        // is `None` at startup, so this begins at the default interval.
+        let mut ticker_period = self.refresh_interval();
+        let mut ticker = interval(ticker_period);
         ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
         // Skip the immediate first tick.
         ticker.tick().await;
@@ -468,6 +472,18 @@ impl Actor {
                     }
                     let reply = self.handle(msg.body).await;
                     let _ = msg.reply.send(reply);
+                    // A SetConfig may have changed the effective refresh cadence.
+                    // `refresh_interval()` is already clamped to a non-zero
+                    // Duration, so the rebuilt ticker never panics. Rebuilding
+                    // resets the immediate first tick, which we discard so the
+                    // new period is measured from now rather than firing at once.
+                    let desired_period = self.refresh_interval();
+                    if desired_period != ticker_period {
+                        ticker_period = desired_period;
+                        ticker = interval(ticker_period);
+                        ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
+                        ticker.tick().await;
+                    }
                 }
             }
         }
@@ -565,6 +581,68 @@ mod tests {
         assert_eq!(snap.ports[0].remote_port, Port(5432));
         assert_eq!(snap.ports[0].process.as_deref(), Some("postgres"));
         assert_eq!(snap.ports[0].forward, ForwardState::Idle);
+        cancel.cancel();
+        handle.await.unwrap();
+    }
+
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn periodic_refresh_honors_set_config_interval() {
+        // The periodic auto-refresh ticker must adopt the cadence supplied by
+        // SetConfig while the actor is running, not the startup default.
+        //
+        // A successful periodic tick re-discovers and calls `publish()` on the
+        // watch channel. `tokio::sync::watch` marks the value changed on every
+        // send, so we observe ticks via `has_changed()`/`changed()` rather than
+        // the engine (which is moved into the actor and exposes no call count).
+        let engine = MockEngine::with_ports(vec![MockEngine::port(5432, None, None)]);
+        let (tx, mut state, cancel, handle) = spawn_actor(engine);
+
+        // Configure a 2s cadence (distinct from the 5s startup default) and
+        // connect so the actor is Connected (periodic refresh only runs then).
+        send(
+            &tx,
+            RequestBody::SetConfig {
+                host_alias: "anyhost".to_string(),
+                refresh_secs: 2,
+                auto_reconnect: false,
+            },
+        )
+        .await
+        .unwrap();
+        send(&tx, RequestBody::Connect).await.unwrap();
+        // Drain every published snapshot through Connected so any later change
+        // is attributable to a periodic refresh, not connect bookkeeping.
+        loop {
+            if state.borrow_and_update().status == ConnStatus::Connected {
+                break;
+            }
+            state.changed().await.unwrap();
+        }
+        // Ensure no change is pending after connect settles.
+        tokio::task::yield_now().await;
+        let _ = state.borrow_and_update();
+        assert!(
+            !state.has_changed().unwrap(),
+            "unexpected pending snapshot before any periodic tick"
+        );
+
+        // Advancing less than the configured interval must NOT trigger a tick.
+        tokio::time::advance(Duration::from_millis(1500)).await;
+        tokio::task::yield_now().await;
+        assert!(
+            !state.has_changed().unwrap(),
+            "periodic refresh fired before the configured 2s interval elapsed"
+        );
+
+        // Completing the configured 2s interval must trigger a periodic tick,
+        // which publishes a fresh snapshot on the watch channel.
+        tokio::time::advance(Duration::from_millis(600)).await;
+        tokio::task::yield_now().await;
+        assert!(
+            state.has_changed().unwrap(),
+            "periodic refresh did not honor the configured refresh_secs from SetConfig"
+        );
+
         cancel.cancel();
         handle.await.unwrap();
     }
