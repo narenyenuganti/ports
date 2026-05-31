@@ -98,6 +98,8 @@ public final class AppModel: ObservableObject {
     @Published public var hosts: [String] = []
     /// Active toast, if any.
     @Published public var toast: Toast?
+    /// Currently highlighted port in the popover's keyboard-navigable list.
+    @Published var selectedRemotePort: UInt16?
 
     private let defaults: UserDefaults
     private var sender: (any RequestSending)?
@@ -152,6 +154,23 @@ public final class AppModel: ObservableObject {
         pendingPortIntents[remotePort] != nil
     }
 
+    func select(remotePort: UInt16) {
+        guard state.ports.contains(where: { $0.remotePort.value == remotePort }) else { return }
+        selectedRemotePort = remotePort
+    }
+
+    func ensureSelection() {
+        syncSelectedPort(with: state)
+    }
+
+    func selectPreviousPort() {
+        moveSelection(by: -1)
+    }
+
+    func selectNextPort() {
+        moveSelection(by: 1)
+    }
+
     // MARK: Applying daemon messages
 
     /// Apply a decoded daemon message to the published state (main-actor isolated).
@@ -160,6 +179,7 @@ public final class AppModel: ObservableObject {
         case .state(let snapshot):
             let previous = state
             state = snapshot
+            syncSelectedPort(with: snapshot)
             resolvePendingPortIntents(with: snapshot)
             rememberConnectedHost(snapshot)
             openNewlyForwardedPorts(previous: previous, current: snapshot)
@@ -256,6 +276,20 @@ public final class AppModel: ObservableObject {
         await send(.stopForward(remotePort: Port(remotePort)), pendingRemotePort: remotePort)
     }
 
+    func toggleSelectedPort() async {
+        ensureSelection()
+        guard let entry = selectedPortEntry,
+              !isPortIntentPending(remotePort: entry.remotePort.value)
+        else { return }
+
+        switch entry.forward {
+        case .forwarding:
+            await stop(remotePort: entry.remotePort.value)
+        case .idle, .error:
+            await forward(remotePort: entry.remotePort.value)
+        }
+    }
+
     /// Re-forward a remote port pinned to a specific local port.
     func setLocalPort(remotePort: UInt16, localPort: UInt16) async {
         guard beginPortIntent(.start, remotePort: remotePort) else { return }
@@ -322,6 +356,42 @@ public final class AppModel: ObservableObject {
         guard pendingPortIntents[remotePort] == nil else { return false }
         pendingPortIntents[remotePort] = intent
         return true
+    }
+
+    private var selectedPortIndex: Int? {
+        guard let selectedRemotePort else { return nil }
+        return state.ports.firstIndex { $0.remotePort.value == selectedRemotePort }
+    }
+
+    private var selectedPortEntry: PortEntry? {
+        guard let selectedPortIndex else { return nil }
+        return state.ports[selectedPortIndex]
+    }
+
+    private func syncSelectedPort(with snapshot: PortsState) {
+        guard let first = snapshot.ports.first else {
+            selectedRemotePort = nil
+            return
+        }
+
+        if let selectedRemotePort,
+           snapshot.ports.contains(where: { $0.remotePort.value == selectedRemotePort }) {
+            return
+        }
+
+        selectedRemotePort = first.remotePort.value
+    }
+
+    private func moveSelection(by offset: Int) {
+        guard !state.ports.isEmpty else {
+            selectedRemotePort = nil
+            return
+        }
+
+        ensureSelection()
+        let current = selectedPortIndex ?? 0
+        let next = min(max(current + offset, 0), state.ports.count - 1)
+        selectedRemotePort = state.ports[next].remotePort.value
     }
 
     private func resolvePendingPortIntents(with snapshot: PortsState) {

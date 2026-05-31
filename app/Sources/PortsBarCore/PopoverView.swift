@@ -2,7 +2,8 @@ import AppKit
 import SwiftUI
 
 enum PopoverLayout {
-    static let portListMaxHeight: CGFloat = 780
+    static let width: CGFloat = 420
+    static let portListMaxHeight: CGFloat = 920
     static let portListSpacing: CGFloat = 5
     static let portTileHorizontalPadding: CGFloat = 10
     static let portTileVerticalPadding: CGFloat = 7
@@ -46,7 +47,7 @@ public struct PopoverView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
         }
-        .frame(width: 340)
+        .frame(width: PopoverLayout.width)
     }
 
     @ViewBuilder
@@ -66,14 +67,24 @@ public struct PopoverView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, 12)
         } else {
-            ScrollView {
-                VStack(spacing: PopoverLayout.portListSpacing) {
-                    ForEach(model.state.ports, id: \.remotePort) { entry in
-                        PortTileView(entry: entry)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(spacing: PopoverLayout.portListSpacing) {
+                        ForEach(model.state.ports, id: \.remotePort) { entry in
+                            PortTileView(entry: entry)
+                                .id(entry.remotePort.value)
+                        }
                     }
                 }
+                .onAppear { model.ensureSelection() }
+                .onChange(of: model.selectedRemotePort) { _, selectedRemotePort in
+                    guard let selectedRemotePort else { return }
+                    withAnimation(.easeOut(duration: 0.12)) {
+                        proxy.scrollTo(selectedRemotePort, anchor: .center)
+                    }
+                }
+                .frame(maxHeight: PopoverLayout.portListMaxHeight)
             }
-            .frame(maxHeight: PopoverLayout.portListMaxHeight)
         }
     }
 }

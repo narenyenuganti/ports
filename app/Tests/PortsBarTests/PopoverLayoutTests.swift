@@ -1,3 +1,4 @@
+import AppKit
 import Testing
 @testable import PortsBarCore
 
@@ -5,7 +6,8 @@ import Testing
 struct PopoverLayoutTests {
     @Test("port list allows a taller dropdown before scrolling")
     func portListMaxHeight() {
-        #expect(PopoverLayout.portListMaxHeight == 780)
+        #expect(PopoverLayout.width == 420)
+        #expect(PopoverLayout.portListMaxHeight == 920)
     }
 
     @Test("port tiles use compact spacing")
@@ -51,5 +53,14 @@ struct PopoverLayoutTests {
         #expect(presentation.primaryValue == "next-server")
         #expect(presentation.detail == "localhost:13000")
         #expect(presentation.portAccessory == ":3000")
+    }
+
+    @Test("keyboard commands match terminal navigation keys")
+    func keyboardCommandMapping() {
+        #expect(PopoverKeyboardCommand(charactersIgnoringModifiers: "j", specialKey: nil) == .selectNext)
+        #expect(PopoverKeyboardCommand(charactersIgnoringModifiers: "k", specialKey: nil) == .selectPrevious)
+        #expect(PopoverKeyboardCommand(charactersIgnoringModifiers: nil, specialKey: .downArrow) == .selectNext)
+        #expect(PopoverKeyboardCommand(charactersIgnoringModifiers: nil, specialKey: .upArrow) == .selectPrevious)
+        #expect(PopoverKeyboardCommand(charactersIgnoringModifiers: nil, specialKey: .carriageReturn) == .toggleSelected)
     }
 }

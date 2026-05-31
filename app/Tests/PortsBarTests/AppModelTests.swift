@@ -259,6 +259,113 @@ struct AppModelIntentTests {
         #expect(lp == nil)
     }
 
+    @Test("state selection defaults to first port and is clamped on updates")
+    func selectionDefaultsAndClamps() {
+        let model = AppModel(defaults: makeDefaults())
+        model.apply(.state(PortsState(
+            host: "h",
+            status: .connected,
+            statusDetail: nil,
+            ports: [
+                PortEntry(remotePort: Port(3000), forward: .idle),
+                PortEntry(remotePort: Port(8080), forward: .idle),
+            ]
+        )))
+        #expect(model.selectedRemotePort == 3000)
+
+        model.select(remotePort: 8080)
+        #expect(model.selectedRemotePort == 8080)
+
+        model.apply(.state(PortsState(
+            host: "h",
+            status: .connected,
+            statusDetail: nil,
+            ports: [PortEntry(remotePort: Port(3000), forward: .idle)]
+        )))
+        #expect(model.selectedRemotePort == 3000)
+    }
+
+    @Test("selection moves up and down like the terminal UI")
+    func selectionMovesUpAndDown() {
+        let model = AppModel(defaults: makeDefaults())
+        model.apply(.state(PortsState(
+            host: "h",
+            status: .connected,
+            statusDetail: nil,
+            ports: [
+                PortEntry(remotePort: Port(3000), forward: .idle),
+                PortEntry(remotePort: Port(8080), forward: .idle),
+                PortEntry(remotePort: Port(9000), forward: .idle),
+            ]
+        )))
+
+        model.selectNextPort()
+        #expect(model.selectedRemotePort == 8080)
+        model.selectNextPort()
+        #expect(model.selectedRemotePort == 9000)
+        model.selectNextPort()
+        #expect(model.selectedRemotePort == 9000)
+        model.selectPreviousPort()
+        #expect(model.selectedRemotePort == 8080)
+        model.selectPreviousPort()
+        #expect(model.selectedRemotePort == 3000)
+        model.selectPreviousPort()
+        #expect(model.selectedRemotePort == 3000)
+    }
+
+    @Test("enter toggles an idle selected port to forwarding")
+    func toggleSelectedIdlePortStartsForwarding() async {
+        let sender = RecordingSender()
+        let model = AppModel(defaults: makeDefaults(), sender: sender)
+        model.apply(.state(PortsState(
+            host: "h",
+            status: .connected,
+            statusDetail: nil,
+            ports: [
+                PortEntry(remotePort: Port(3000), forward: .idle),
+                PortEntry(remotePort: Port(8080), forward: .idle),
+            ]
+        )))
+        model.select(remotePort: 8080)
+
+        await model.toggleSelectedPort()
+
+        let requests = await sender.log.requests
+        #expect(requests.count == 1)
+        guard case .startForward(let remotePort, let localPort) = requests[0].body else {
+            Issue.record("expected start_forward")
+            return
+        }
+        #expect(remotePort == Port(8080))
+        #expect(localPort == nil)
+    }
+
+    @Test("enter toggles a forwarding selected port to stopped")
+    func toggleSelectedForwardingPortStops() async {
+        let sender = RecordingSender()
+        let model = AppModel(defaults: makeDefaults(), sender: sender)
+        model.apply(.state(PortsState(
+            host: "h",
+            status: .connected,
+            statusDetail: nil,
+            ports: [
+                PortEntry(remotePort: Port(3000), forward: .idle),
+                PortEntry(remotePort: Port(8080), forward: .forwarding(localPort: Port(18080))),
+            ]
+        )))
+        model.select(remotePort: 8080)
+
+        await model.toggleSelectedPort()
+
+        let requests = await sender.log.requests
+        #expect(requests.count == 1)
+        guard case .stopForward(let remotePort) = requests[0].body else {
+            Issue.record("expected stop_forward")
+            return
+        }
+        #expect(remotePort == Port(8080))
+    }
+
     @Test("repeated forward clicks while pending send one request")
     func repeatedForwardClicksWhilePendingSendOneRequest() async {
         let sender = RecordingSender()

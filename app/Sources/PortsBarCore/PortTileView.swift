@@ -53,6 +53,10 @@ struct PortTileView: View {
         model.isPortIntentPending(remotePort: remotePort)
     }
 
+    private var isSelected: Bool {
+        model.selectedRemotePort == remotePort
+    }
+
     private var presentation: PortTilePresentation {
         PortTilePresentation(entry: entry)
     }
@@ -60,7 +64,7 @@ struct PortTileView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Button {
-                expanded.toggle()
+                handleHeaderTap()
             } label: {
                 tileHeader
             }
@@ -73,9 +77,18 @@ struct PortTileView: View {
         .padding(.horizontal, PopoverLayout.portTileHorizontalPadding)
         .padding(.vertical, PopoverLayout.portTileVerticalPadding)
         .background(
-            .quaternary.opacity(0.4),
+            isSelected ? Color.accentColor.opacity(0.16) : Color.secondary.opacity(0.08),
             in: RoundedRectangle(cornerRadius: PopoverLayout.portTileCornerRadius)
         )
+        .overlay(
+            RoundedRectangle(cornerRadius: PopoverLayout.portTileCornerRadius)
+                .stroke(isSelected ? Color.accentColor.opacity(0.8) : .clear, lineWidth: 1)
+        )
+        .onChange(of: localPort) { _, newValue in
+            if let newValue {
+                customLocalPort = "\(newValue)"
+            }
+        }
     }
 
     private var tileHeader: some View {
@@ -109,14 +122,18 @@ struct PortTileView: View {
 
     @ViewBuilder
     private var statusPill: some View {
-        switch entry.forward {
-        case .forwarding:
-            pill("Forwarding", .green)
-        case .idle:
-            pill("Idle", .secondary)
-        case .error(let detail):
-            pill("Error", .red)
-                .help(detail)
+        if isPending {
+            pill(isForwarding ? "Updating" : "Forwarding", isForwarding ? .yellow : .green)
+        } else {
+            switch entry.forward {
+            case .forwarding:
+                pill("Forwarding", .green)
+            case .idle:
+                pill("Idle", .secondary)
+            case .error(let detail):
+                pill("Error", .red)
+                    .help(detail)
+            }
         }
     }
 
@@ -142,8 +159,27 @@ struct PortTileView: View {
     @ViewBuilder
     private var actions: some View {
         HStack(spacing: 8) {
+            Text("localhost")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            TextField(localPort.map(String.init) ?? "auto", text: $customLocalPort)
+                .textFieldStyle(.roundedBorder)
+                .monospacedDigit()
+                .frame(width: 90)
+            Button("Apply") {
+                if let p = UInt16(customLocalPort) {
+                    Task { await model.setLocalPort(remotePort: remotePort, localPort: p) }
+                }
+            }
+            .controlSize(.small)
+            .disabled(isPending || UInt16(customLocalPort) == nil || UInt16(customLocalPort) == localPort)
+            Spacer()
+        }
+        .disabled(isPending)
+
+        HStack(spacing: 8) {
             if isForwarding {
-                Button(isPending ? "Stopping..." : "Stop") {
+                Button("Stop") {
                     Task { await model.stop(remotePort: remotePort) }
                 }
                 .disabled(isPending)
@@ -167,21 +203,6 @@ struct PortTileView: View {
         }
         .buttonStyle(.bordered)
         .controlSize(.small)
-
-        HStack(spacing: 6) {
-            TextField("local port", text: $customLocalPort)
-                .textFieldStyle(.roundedBorder)
-                .frame(width: 90)
-            Button("Set") {
-                if let p = UInt16(customLocalPort) {
-                    Task { await model.setLocalPort(remotePort: remotePort, localPort: p) }
-                    customLocalPort = ""
-                }
-            }
-            .controlSize(.small)
-            .disabled(isPending || UInt16(customLocalPort) == nil)
-        }
-        .disabled(isPending)
     }
 
     // App-side actions (no daemon round-trip), using the bound local port.
@@ -196,5 +217,15 @@ struct PortTileView: View {
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.setString("http://localhost:\(local)", forType: .string)
+    }
+
+    private func handleHeaderTap() {
+        model.select(remotePort: remotePort)
+
+        if let localPort {
+            customLocalPort = "\(localPort)"
+        }
+
+        expanded.toggle()
     }
 }
